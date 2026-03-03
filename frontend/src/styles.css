@@ -83,3 +83,30 @@ button:disabled {
 .error {
   color: #fca5a5;
 }
+
+
+.script-card {
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.script-card h2 {
+  margin-top: 0;
+}
+
+.script-card pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  background: #020617;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.composer-hint {
+  margin: 0;
+  color: #93c5fd;
+  font-size: 0.9rem;
+}

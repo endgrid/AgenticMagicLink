@@ -79,41 +79,38 @@ def test_lambda_post_message_returns_404_for_missing_session():
     assert json.loads(response["body"]) == {"detail": "Session not found"}
 
 
-def test_prompt_flow_requests_account_then_role_then_returns_script():
+def test_build_message_response_sets_next_expected_input_stage():
     store = InMemorySessionStore()
     session_id = create_session_response(store).session_id
 
-    first_response = build_message_response(
+    response = build_message_response(
+        MessageRequest(session_id=session_id, message='Need required_functions, listBuckets, getObject'),
+        store,
+    )
+
+    assert response.next_expected_input == 'account_id'
+    assert '12-digit AWS account ID' in response.messages[-1].content
+
+
+def test_build_message_response_captures_role_arn_and_completes_stage():
+    store = InMemorySessionStore()
+    session_id = create_session_response(store).session_id
+
+    build_message_response(
+        MessageRequest(session_id=session_id, message='required_functions, listBuckets'),
+        store,
+    )
+    build_message_response(
+        MessageRequest(session_id=session_id, message='target account 123456789012'),
+        store,
+    )
+    response = build_message_response(
         MessageRequest(
             session_id=session_id,
-            message="required_functions, ec2:DescribeInstances, s3:ListBucket",
+            message='use arn:aws:iam::123456789012:role/AgenticMagicLinkRole',
         ),
         store,
     )
 
-    assert "AWS account ID" in first_response.messages[-1].content
-    assert first_response.magic_link_script is None
-
-    second_response = build_message_response(
-        MessageRequest(
-            session_id=session_id,
-            message="My target account is 123456789012",
-            history=first_response.messages,
-        ),
-        store,
-    )
-
-    assert "IAM role" in second_response.messages[-1].content
-    assert second_response.magic_link_script is None
-
-    final_response = build_message_response(
-        MessageRequest(
-            session_id=session_id,
-            message="Role ARN: arn:aws:iam::123456789012:role/MagicLinkRole",
-            history=second_response.messages,
-        ),
-        store,
-    )
-
-    assert "generated your magic-link script payload" in final_response.messages[-1].content
-    assert final_response.magic_link_script is not None
+    assert response.next_expected_input is None
+    assert 'All required inputs are captured' in response.messages[-1].content

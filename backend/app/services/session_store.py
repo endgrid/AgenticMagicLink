@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import os
 import re
 import time
@@ -73,16 +74,18 @@ class InMemorySessionStore:
                 item.strip() for item in user_message.split(",") if item.strip()
             ]
 
-        account_match = ACCOUNT_ID_PATTERN.search(user_message)
-        if account_match:
-            session.target_account_id = account_match.group(1)
-            if not session.target_role_arn:
-                session.workflow_message = (
-                    "Create the contractor role in AWS, then send me the role ARN."
-                )
+        if "target account" in user_message.lower() or "account id" in user_message.lower():
+            maybe_account_id = self._extract_account_id(user_message)
+            if maybe_account_id:
+                session.target_account_id = maybe_account_id
 
-        if "arn:aws:iam::" in user_message:
-            self._capture_role_arn(session, user_message)
+        maybe_role_arn = self._extract_role_arn(user_message)
+        if maybe_role_arn:
+            session.role_arn = maybe_role_arn
+
+        if "policy" in user_message.lower():
+            policy = self._generate_policy(session, user_message)
+            session.generated_policy_json = json.dumps(policy) if policy else None
 
             if "policy" in lowered_message:
                 policy = self._generate_policy(session, user_message)
@@ -97,41 +100,17 @@ class InMemorySessionStore:
 
         return session
 
-    def _capture_role_arn(self, session: SessionState, user_message: str) -> None:
-        role_arn_match = ROLE_ARN_PATTERN.search(user_message)
-        if not role_arn_match:
-            session.workflow_message = (
-                "I couldn't validate that role ARN. Please send an ARN like "
-                "arn:aws:iam::123456789012:role/ContractorRole."
-            )
-            return
+    def _extract_account_id(self, user_message: str) -> str | None:
+        match = re.search(r"\b(\d{12})\b", user_message)
+        if match:
+            return match.group(1)
+        return None
 
-        account_id_in_role_arn = role_arn_match.group(1)
-        if session.target_account_id and session.target_account_id != account_id_in_role_arn:
-            session.workflow_message = (
-                f"Role ARN account ({account_id_in_role_arn}) does not match target account "
-                f"({session.target_account_id}). Please send the correct role ARN."
-            )
-            return
-
-        session.target_role_arn = role_arn_match.group(0)
-        if not session.target_account_id:
-            session.target_account_id = account_id_in_role_arn
-        session.workflow_message = "Role ARN captured. I can now generate your magic-link script."
-
-    def _build_magic_link_script(self, session: SessionState) -> None:
-        script_content = generate_magic_link_script(
-            MagicLinkScriptConfig(
-                default_role_arn=session.target_role_arn or "",
-                default_session_name="contractor-magic-link-session",
-                expected_account_id=session.target_account_id,
-            )
-        )
-        session.magic_link_script = script_content
-        session.magic_link_script_checksum_sha256 = hashlib.sha256(
-            script_content.encode("utf-8")
-        ).hexdigest()
-        session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
+    def _extract_role_arn(self, user_message: str) -> str | None:
+        match = re.search(r"\barn:aws:iam::\d{12}:role/[A-Za-z0-9+=,.@_\-/]+\b", user_message)
+        if match:
+            return match.group(0)
+        return None
 
     def _emit_metric(self, metric_name: str, value: int, outcome: str) -> None:
         metric_log = {
