@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import os
+import re
 import time
 import uuid
 
@@ -16,11 +17,14 @@ from src.bedrock_client import (
     BedrockInvocationError,
     BedrockOutputError,
 )
-from src.magic_link_script import MAGIC_LINK_SCRIPT_VERSION, generate_magic_link_script
+from src.magic_link_script import MAGIC_LINK_SCRIPT_VERSION, MagicLinkScriptConfig, generate_magic_link_script
 
 from ..models.session import SessionState
 
 logger = logging.getLogger(__name__)
+
+ACCOUNT_ID_PATTERN = re.compile(r"\b(\d{12})\b")
+ROLE_ARN_PATTERN = re.compile(r"\barn:aws:iam::(\d{12}):role\/[A-Za-z0-9+=,.@_\/-]{1,512}\b")
 
 
 class PolicyFailureDLQ:
@@ -48,7 +52,10 @@ class InMemorySessionStore:
         self._failure_dlq = failure_dlq or PolicyFailureDLQ()
 
     def create_session(self) -> SessionState:
-        session = SessionState(session_id=str(uuid.uuid4()))
+        session = SessionState(
+            session_id=str(uuid.uuid4()),
+            conversation_stage="awaiting_work_description",
+        )
         self._sessions[session.session_id] = session
         return session
 
@@ -59,6 +66,8 @@ class InMemorySessionStore:
         session = self._sessions.get(session_id)
         if session is None:
             raise KeyError(session_id)
+
+        session.workflow_message = None
 
         if "required_functions" in user_message.lower():
             session.required_functions = [
@@ -78,13 +87,16 @@ class InMemorySessionStore:
             policy = self._generate_policy(session, user_message)
             session.generated_policy_json = json.dumps(policy) if policy else None
 
-        if "script" in user_message.lower() or "magic link" in user_message.lower():
-            script_content = generate_magic_link_script()
-            session.magic_link_script = script_content
-            session.magic_link_script_checksum_sha256 = hashlib.sha256(
-                script_content.encode("utf-8")
-            ).hexdigest()
-            session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
+            if "policy" in lowered_message:
+                policy = self._generate_policy(session, user_message)
+                session.generated_policy_json = json.dumps(policy) if policy else None
+
+        if (
+            session.target_account_id
+            and session.target_role_arn
+            and ("script" in user_message.lower() or "magic link" in user_message.lower() or session.magic_link_script is None)
+        ):
+            self._build_magic_link_script(session)
 
         return session
 
