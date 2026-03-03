@@ -14,7 +14,19 @@ class SessionNotFoundError(Exception):
 
 def create_session_response(store: InMemorySessionStore) -> SessionResponse:
     session = store.create_session()
-    return SessionResponse(session_id=session.session_id)
+    next_expected_input = "work_description"
+    return SessionResponse(
+        session_id=session.session_id,
+        initial_assistant_message=build_initial_assistant_message(),
+        next_expected_input=next_expected_input,
+    )
+
+
+def build_initial_assistant_message() -> str:
+    return (
+        "Please describe the IAM workflow or AWS functions you want this magic "
+        "link flow to support."
+    )
 
 
 def _determine_next_expected_input(
@@ -46,8 +58,7 @@ def _build_assistant_prompt(
 ) -> str:
     prompt_by_stage = {
         "work_description": (
-            "Please describe the IAM workflow or AWS functions you want this magic "
-            "link flow to support."
+            build_initial_assistant_message()
         ),
         "account_id": "Great. Next, provide the 12-digit AWS account ID this flow should target.",
         "role_arn": (
