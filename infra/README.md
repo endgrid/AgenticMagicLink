@@ -1,6 +1,6 @@
 # Infrastructure
 
-Use this folder to add Terraform/CDK/CloudFormation templates for deploying:
+Terraform configuration for deploying the backend chat API on AWS Lambda + API Gateway HTTP API.
 
 - Frontend static hosting.
 - Backend API service.

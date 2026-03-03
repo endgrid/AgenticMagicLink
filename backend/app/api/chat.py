@@ -9,8 +9,7 @@ store = SessionService.from_env()
 
 @router.post("/session", response_model=SessionResponse)
 def create_session() -> SessionResponse:
-    session = store.create_session()
-    return SessionResponse(session_id=session.session_id)
+    return create_session_response(store)
 
 
 @router.post("/message", response_model=MessageResponse)
