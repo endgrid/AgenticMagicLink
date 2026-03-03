@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 import uuid
 
@@ -15,11 +16,14 @@ from src.bedrock_client import (
     BedrockInvocationError,
     BedrockOutputError,
 )
-from src.magic_link_script import MAGIC_LINK_SCRIPT_VERSION, generate_magic_link_script
+from src.magic_link_script import MAGIC_LINK_SCRIPT_VERSION, MagicLinkScriptConfig, generate_magic_link_script
 
 from ..models.session import SessionState
 
 logger = logging.getLogger(__name__)
+
+ACCOUNT_ID_PATTERN = re.compile(r"\b(\d{12})\b")
+ROLE_ARN_PATTERN = re.compile(r"\barn:aws:iam::(\d{12}):role\/[A-Za-z0-9+=,.@_\/-]{1,512}\b")
 
 
 class PolicyFailureDLQ:
@@ -59,32 +63,72 @@ class InMemorySessionStore:
         if session is None:
             raise KeyError(session_id)
 
+        session.workflow_message = None
+
         if "required_functions" in user_message.lower():
             session.required_functions = [
                 item.strip() for item in user_message.split(",") if item.strip()
             ]
 
-        if "target account" in user_message.lower():
-            tokens = user_message.split()
-            maybe_account_id = next(
-                (token for token in tokens if token.isdigit() and len(token) == 12), None
-            )
-            if maybe_account_id:
-                session.target_account_id = maybe_account_id
+        account_match = ACCOUNT_ID_PATTERN.search(user_message)
+        if account_match:
+            session.target_account_id = account_match.group(1)
+            if not session.target_role_arn:
+                session.workflow_message = (
+                    "Create the contractor role in AWS, then send me the role ARN."
+                )
+
+        if "arn:aws:iam::" in user_message:
+            self._capture_role_arn(session, user_message)
 
         if "policy" in user_message.lower():
             policy = self._generate_policy(session, user_message)
             session.generated_policy_json = json.dumps(policy) if policy else None
 
-        if "script" in user_message.lower() or "magic link" in user_message.lower():
-            script_content = generate_magic_link_script()
-            session.magic_link_script = script_content
-            session.magic_link_script_checksum_sha256 = hashlib.sha256(
-                script_content.encode("utf-8")
-            ).hexdigest()
-            session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
+        if (
+            session.target_account_id
+            and session.target_role_arn
+            and ("script" in user_message.lower() or "magic link" in user_message.lower() or session.magic_link_script is None)
+        ):
+            self._build_magic_link_script(session)
 
         return session
+
+    def _capture_role_arn(self, session: SessionState, user_message: str) -> None:
+        role_arn_match = ROLE_ARN_PATTERN.search(user_message)
+        if not role_arn_match:
+            session.workflow_message = (
+                "I couldn't validate that role ARN. Please send an ARN like "
+                "arn:aws:iam::123456789012:role/ContractorRole."
+            )
+            return
+
+        account_id_in_role_arn = role_arn_match.group(1)
+        if session.target_account_id and session.target_account_id != account_id_in_role_arn:
+            session.workflow_message = (
+                f"Role ARN account ({account_id_in_role_arn}) does not match target account "
+                f"({session.target_account_id}). Please send the correct role ARN."
+            )
+            return
+
+        session.target_role_arn = role_arn_match.group(0)
+        if not session.target_account_id:
+            session.target_account_id = account_id_in_role_arn
+        session.workflow_message = "Role ARN captured. I can now generate your magic-link script."
+
+    def _build_magic_link_script(self, session: SessionState) -> None:
+        script_content = generate_magic_link_script(
+            MagicLinkScriptConfig(
+                default_role_arn=session.target_role_arn or "",
+                default_session_name="contractor-magic-link-session",
+                expected_account_id=session.target_account_id,
+            )
+        )
+        session.magic_link_script = script_content
+        session.magic_link_script_checksum_sha256 = hashlib.sha256(
+            script_content.encode("utf-8")
+        ).hexdigest()
+        session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
 
     def _emit_metric(self, metric_name: str, value: int, outcome: str) -> None:
         metric_log = {

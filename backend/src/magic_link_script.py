@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import textwrap
 
 
@@ -41,6 +42,9 @@ class MagicLinkScriptConfig:
     session_name_placeholder: str = DEFAULT_SESSION_NAME_PLACEHOLDER
     region_placeholder: str = DEFAULT_REGION_PLACEHOLDER
     default_session_duration_seconds: int = DEFAULT_SESSION_DURATION_SECONDS
+    default_role_arn: str = DEFAULT_ROLE_ARN_PLACEHOLDER
+    default_session_name: str = DEFAULT_SESSION_NAME_PLACEHOLDER
+    expected_account_id: str | None = None
 
 
 def generate_magic_link_script(config: MagicLinkScriptConfig | None = None) -> str:
@@ -55,6 +59,9 @@ def generate_magic_link_script(config: MagicLinkScriptConfig | None = None) -> s
 
     cfg = config or MagicLinkScriptConfig()
     policy_literal = repr(DEFAULT_LEAST_PRIVILEGE_SESSION_POLICY)
+    default_role_arn_literal = json.dumps(cfg.default_role_arn)
+    default_session_name_literal = json.dumps(cfg.default_session_name)
+    expected_account_id_literal = json.dumps(cfg.expected_account_id)
 
     return textwrap.dedent(
         f'''\
@@ -86,12 +93,15 @@ import urllib.request
 
 DEFAULT_DURATION_SECONDS = {cfg.default_session_duration_seconds}
 DEFAULT_POLICY_JSON = {policy_literal}
+DEFAULT_ROLE_ARN = {default_role_arn_literal}
+DEFAULT_SESSION_NAME = {default_session_name_literal}
+EXPECTED_ACCOUNT_ID = {expected_account_id_literal}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create a temporary AWS console magic link")
-    parser.add_argument("--role-arn", required=True, help="Role ARN (or federation principal identifier)")
-    parser.add_argument("--session-name", required=True, help="STS session name")
+    parser.add_argument("--role-arn", default=DEFAULT_ROLE_ARN, help="Role ARN (or federation principal identifier)")
+    parser.add_argument("--session-name", default=DEFAULT_SESSION_NAME, help="STS session name")
     parser.add_argument("--region", required=True, help="AWS region used for STS client")
     parser.add_argument(
         "--duration-seconds",
@@ -182,6 +192,12 @@ def build_login_url(signin_token: str, destination: str, issuer: str = "magic-li
 
 def main() -> int:
     args = parse_args()
+    if not args.role_arn:
+        raise SystemExit("A role ARN is required. Provide --role-arn.")
+
+    if EXPECTED_ACCOUNT_ID and f"::{{EXPECTED_ACCOUNT_ID}}:" not in args.role_arn:
+        raise SystemExit("Role ARN account does not match the target account.")
+
     if args.duration_seconds > 3600:
         raise SystemExit("Refusing duration over 3600 seconds. Use the shortest viable session.")
 

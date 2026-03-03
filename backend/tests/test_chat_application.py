@@ -31,6 +31,26 @@ def test_build_message_response_appends_messages():
     assert response.messages[-1].role == "assistant"
 
 
+def test_build_message_response_walks_stage_to_script_payload():
+    store = InMemorySessionStore()
+    session_id = create_session_response(store).session_id
+
+    account_payload = MessageRequest(session_id=session_id, message="Target account is 123456789012")
+    account_response = build_message_response(account_payload, store)
+    assert "Create the contractor role in AWS" in account_response.messages[-1].content
+    assert account_response.magic_link_script is None
+
+    role_payload = MessageRequest(
+        session_id=session_id,
+        message="Use role arn:aws:iam::123456789012:role/ContractorRole",
+        history=account_response.messages,
+    )
+    role_response = build_message_response(role_payload, store)
+
+    assert role_response.magic_link_script is not None
+    assert "Run instructions:" in role_response.messages[-1].content
+
+
 def test_build_message_response_raises_for_missing_session():
     store = InMemorySessionStore()
     payload = MessageRequest(session_id="missing", message="hello")

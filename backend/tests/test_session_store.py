@@ -82,3 +82,39 @@ def test_update_from_message_enqueues_failure_for_invocation_error():
 def test_policy_dlq_noop_without_url():
     dlq = PolicyFailureDLQ(queue_url=None, sqs_client=None)
     dlq.enqueue({"message": "ignored"})
+
+
+def test_account_id_prompted_for_role_arn():
+    store = InMemorySessionStore()
+    session = store.create_session()
+
+    updated = store.update_from_message(session.session_id, "target account is 123456789012")
+
+    assert updated.target_account_id == "123456789012"
+    assert updated.workflow_message == "Create the contractor role in AWS, then send me the role ARN."
+
+
+def test_invalid_role_arn_sets_validation_error():
+    store = InMemorySessionStore()
+    session = store.create_session()
+    store.update_from_message(session.session_id, "target account is 123456789012")
+
+    updated = store.update_from_message(session.session_id, "role arn:aws:iam::123456789012:user/not-a-role")
+
+    assert updated.target_role_arn is None
+    assert "couldn't validate" in (updated.workflow_message or "").lower()
+
+
+def test_valid_role_arn_generates_script():
+    store = InMemorySessionStore()
+    session = store.create_session()
+    store.update_from_message(session.session_id, "target account 123456789012")
+
+    updated = store.update_from_message(
+        session.session_id,
+        "Here is role arn:aws:iam::123456789012:role/ContractorRole",
+    )
+
+    assert updated.target_role_arn == "arn:aws:iam::123456789012:role/ContractorRole"
+    assert updated.magic_link_script is not None
+    assert "DEFAULT_ROLE_ARN = \"arn:aws:iam::123456789012:role/ContractorRole\"" in updated.magic_link_script

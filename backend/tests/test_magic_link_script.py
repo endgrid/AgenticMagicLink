@@ -4,12 +4,17 @@ import unittest
 import urllib.parse
 from unittest import mock
 
-from backend.src.magic_link_script import generate_magic_link_script
+from backend.src.magic_link_script import MagicLinkScriptConfig, generate_magic_link_script
 
 
 class MagicLinkScriptIntegrationTest(unittest.TestCase):
     def test_generated_script_constructs_login_url_from_federation_token(self) -> None:
-        script = generate_magic_link_script()
+        script = generate_magic_link_script(
+            MagicLinkScriptConfig(
+                default_role_arn="arn:aws:iam::123456789012:role/Test",
+                expected_account_id="123456789012",
+            )
+        )
         namespace: dict = {}
         exec(script, namespace)
 
@@ -40,8 +45,6 @@ class MagicLinkScriptIntegrationTest(unittest.TestCase):
 
         with mock.patch("sys.argv", [
             "magic_link.py",
-            "--role-arn", "arn:aws:iam::123456789012:role/Test",
-            "--session-name", "session-a",
             "--region", "us-east-1",
             "--destination", "https://console.aws.amazon.com/s3/home",
         ]), mock.patch("urllib.request.urlopen", side_effect=fake_urlopen), mock.patch(
@@ -58,6 +61,22 @@ class MagicLinkScriptIntegrationTest(unittest.TestCase):
         self.assertEqual(login_qs["Action"], ["login"])
         self.assertEqual(login_qs["SigninToken"], ["TOKEN123"])
         self.assertEqual(login_qs["Destination"], ["https://console.aws.amazon.com/s3/home"])
+
+    def test_generated_script_rejects_account_mismatch(self) -> None:
+        script = generate_magic_link_script(
+            MagicLinkScriptConfig(
+                default_role_arn="arn:aws:iam::210987654321:role/Test",
+                expected_account_id="123456789012",
+            )
+        )
+        namespace: dict = {}
+        exec(script, namespace)
+
+        with mock.patch("sys.argv", ["magic_link.py", "--region", "us-east-1"]):
+            with self.assertRaises(SystemExit) as exc:
+                namespace["main"]()
+
+        self.assertIn("does not match", str(exc.exception))
 
 
 if __name__ == "__main__":
