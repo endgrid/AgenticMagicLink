@@ -37,14 +37,28 @@ def _build_assistant_prompt(
     role_arn: str | None,
     generated_policy_json: str | None,
     magic_link_script: str | None,
+    workflow_message: str | None,
     next_expected_input: str | None,
 ) -> str:
     prompt_by_stage = {
-        "work_description": "Please describe the IAM workflow or AWS functions you want this magic link flow to support.",
+        "work_description": (
+            "Please describe the IAM workflow or AWS functions you want this magic "
+            "link flow to support."
+        ),
         "account_id": "Great. Next, provide the 12-digit AWS account ID this flow should target.",
-        "role_arn": "Thanks. Now provide the IAM role ARN to assume (example: arn:aws:iam::123456789012:role/MyRole).",
-        None: "All required inputs are captured. You can ask for policy/script generation refinements or request another script version.",
+        "role_arn": (
+            "Thanks. Now provide the IAM role ARN to assume "
+            "(example: arn:aws:iam::123456789012:role/MyRole)."
+        ),
+        None: (
+            "All required inputs are captured. You can ask for policy/script generation "
+            "refinements or request another script version."
+        ),
     }
+
+    assistant_guidance = prompt_by_stage[next_expected_input]
+    if workflow_message:
+        assistant_guidance = f"{assistant_guidance}\n\n{workflow_message}"
 
     return (
         "Captured workflow state:\n"
@@ -53,7 +67,7 @@ def _build_assistant_prompt(
         f"- role_arn: {role_arn or 'unset'}\n"
         f"- generated_policy_json: {'set' if generated_policy_json else 'unset'}\n"
         f"- magic_link_script: {'set' if magic_link_script else 'unset'}\n\n"
-        f"{prompt_by_stage[next_expected_input]}"
+        f"{assistant_guidance}"
     )
 
 
@@ -75,6 +89,7 @@ def build_message_response(payload: MessageRequest, store: InMemorySessionStore)
         updated_session.role_arn,
         updated_session.generated_policy_json,
         updated_session.magic_link_script,
+        updated_session.workflow_message,
         next_expected_input,
     )
 
