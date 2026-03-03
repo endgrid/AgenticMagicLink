@@ -1,79 +1,144 @@
-# Agentic Magic Link Monorepo
+# Agentic Magic Link
 
-This repository uses a monorepo layout with a React chat frontend and a FastAPI backend that manages an in-memory agent workflow session.
+Agentic Magic Link is a monorepo for generating short-lived AWS "magic link" access scripts through a guided chat workflow.
+
+It includes:
+- a **React + Vite frontend** chat interface (`frontend/`), and
+- a **FastAPI backend** (`backend/`) that tracks workflow state in memory, optionally generates IAM policy JSON with Amazon Bedrock, and returns an executable Python script payload.
 
 ## Repository layout
 
-- `frontend/`: React + Vite chat UI that creates a session and sends chat turns.
-- `backend/`: FastAPI API for session creation and workflow turn processing.
-- `infra/`: IaC templates and deployment artifacts for AWS hosting.
+- `frontend/` – Web chat UI.
+- `backend/` – FastAPI app, domain models, session store, Lambda handlers, and tests.
+- `infra/` – Deployment assets (CloudFormation + Terraform snippets, deploy script).
+- `app.py` / `test_app.py` – Legacy standalone workflow example used by root-level tests.
 
-## Architecture overview
+## How the application works
 
-1. The frontend boots and calls `POST /api/chat/session`.
-2. The backend returns a `session_id` and initializes shared session state.
-3. User messages are posted to `POST /api/chat/message`.
-4. The backend updates in-memory state fields:
-   - `required_functions`
-   - `target_account_id`
-   - `generated_policy_json` (generated via Amazon Bedrock when policy generation is requested)
-   - `magic_link_script`
-5. The backend responds with full message history including assistant summary.
+### 1) Session creation
 
-### Frontend/backend dependency contract
+The frontend starts by calling:
 
-- The browser frontend talks **only** to the backend API endpoint configured by `VITE_API_BASE_URL`.
-- The frontend does **not** use AWS SDK clients directly and does **not** perform Cognito/AWS auth flows in the browser.
-- All AWS service access (Bedrock, optional SSM/Secrets Manager reads, optional SQS DLQ writes) happens server-side in the backend.
+- `POST /api/chat/session`
 
-### AWS services used (auditable scope)
+The backend creates an in-memory session and returns:
+- `session_id`
+- `initial_assistant_message`
+- `next_expected_input` (initially `work_description`)
 
-This application does **not** use "all AWS services." It currently uses only the services listed below.
+### 2) Guided workflow via chat messages
 
-| Service | Required/Optional | Runtime purpose | Where configured |
-| --- | --- | --- | --- |
-| Amazon Bedrock Runtime | Optional | Generate IAM policy JSON from function metadata when policy generation is requested. | Backend env (`BEDROCK_MODEL_ID`, `BEDROCK_MODEL_ID_PARAMETER`, or `BEDROCK_MODEL_ID_SECRET_ID`) and backend code (`backend/src/bedrock_client.py`). |
-| AWS Systems Manager Parameter Store | Optional | Resolve Bedrock model ID at runtime when `BEDROCK_MODEL_ID_PARAMETER` is set. | Backend env (`BEDROCK_MODEL_ID_PARAMETER`) and backend code (`backend/src/bedrock_client.py`). |
-| AWS Secrets Manager | Optional | Resolve Bedrock model ID at runtime when `BEDROCK_MODEL_ID_SECRET_ID` is set. | Backend env (`BEDROCK_MODEL_ID_SECRET_ID`, optional `BEDROCK_MODEL_ID_SECRET_KEY`) and backend code (`backend/src/bedrock_client.py`). |
-| Amazon SQS | Optional | Receive failed synchronous policy-generation events when a DLQ URL is configured. | Backend env (`POLICY_GENERATION_DLQ_URL`) and backend code (`backend/app/services/session_store.py`). |
+For each user message, the frontend calls:
 
-## Frontend hosting and deployment
+- `POST /api/chat/message`
 
-The frontend is intended for AWS static hosting behind CloudFront. Provision and deploy with the infrastructure assets under `infra/`.
+The backend updates session state in this order:
+1. **Work description / required functions**
+2. **Target AWS account ID** (12 digits)
+3. **Target IAM role ARN** (`arn:aws:iam::<account>:role/...`)
+4. **Session duration (seconds)** between **900** and **43200**
 
-- Hosting stack template: `infra/cloudformation/frontend-static-site.yaml`
-- Build + publish script: `infra/scripts/deploy_frontend.sh`
+The response always includes updated transcript messages plus `next_expected_input` so the UI can guide what the user should enter next.
 
-## Running exported magic-link scripts
+### 3) Policy generation (optional)
 
-When the backend captures a `magic_link_script`, the API response includes the full script content and metadata (`checksum_sha256`, `version`) so you can save and verify it before running.
+If a message asks to generate a policy (contains `policy`), the backend tries to call Amazon Bedrock and stores the generated policy JSON in session state.
 
-### Prerequisites
+Failure paths are logged, and failed policy-generation events can be pushed to SQS if a DLQ URL is configured.
 
-- `python` 3.11+ available in the execution environment (`python --version`).
-- `boto3` installed in the environment used to execute the script (`pip install boto3`).
-- AWS credentials available from a standard provider chain source (for example environment variables, shared credentials file, AWS SSO, or an instance/task role).
+### 4) Magic link script generation
 
-### Safe default execution example
+Once account ID, role ARN, and valid duration are present, the backend generates a Python script payload and returns:
+- script `content`
+- `checksum_sha256`
+- script `version`
+
+The assistant message also includes run instructions.
+
+## API contract
+
+### `POST /api/chat/session`
+Creates a new in-memory workflow session.
+
+### `POST /api/chat/message`
+Request body fields:
+- `session_id` (required)
+- `message` (required)
+- `history` (optional prior transcript)
+
+Response fields include:
+- `messages`
+- `next_expected_input`
+- optional `magic_link_script` with `content`, `checksum_sha256`, and `version`
+
+### `GET /health`
+Simple health endpoint returning `{ "status": "ok" }`.
+
+## Frontend/backend contract
+
+- The frontend only calls backend HTTP APIs.
+- The frontend requires `VITE_API_BASE_URL` and trims trailing `/` automatically.
+- AWS SDK calls happen on the backend only.
+
+## Configuration
+
+### Frontend
+
+Required environment variable:
+- `VITE_API_BASE_URL` (for example: `http://localhost:8000`)
+
+### Backend
+
+#### Bedrock model ID source (set one)
+- `BEDROCK_MODEL_ID`
+- `BEDROCK_MODEL_ID_PARAMETER` (SSM Parameter Store name)
+- `BEDROCK_MODEL_ID_SECRET_ID` (Secrets Manager secret id)
+  - optional `BEDROCK_MODEL_ID_SECRET_KEY` (default: `model_id`)
+
+#### Optional runtime settings
+- `BEDROCK_MAX_ATTEMPTS` (default `2`)
+- `POLICY_FAILURE_DLQ_URL` (SQS URL for failed policy generation events)
+
+## Local development
+
+### Backend
+
+From repo root:
 
 ```bash
-# Save response payload field magic_link_script.content into a file
-cat > magic_link.py <<'PY'
-<PASTE_SCRIPT_CONTENT_HERE>
-PY
+python -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-# Optional: verify checksum from magic_link_script.checksum_sha256
-python - <<'PY'
-import hashlib
-from pathlib import Path
-print(hashlib.sha256(Path('magic_link.py').read_bytes()).hexdigest())
-PY
+Alternative (from `backend/`):
 
-# Run with least-privilege defaults and short-lived session
-python magic_link.py \
-  --role-arn arn:aws:iam::123456789012:role/ExampleFederationRole \
-  --session-name aws-magic-link \
-  --region us-east-1
+```bash
+make run
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+VITE_API_BASE_URL=http://localhost:8000 npm run dev
+```
+
+## Running tests
+
+### Backend tests
+
+```bash
+cd backend
+pytest -q
+```
+
+### Legacy root workflow tests
+
+```bash
+pytest -q test_app.py
 ```
 
 ## Linting and formatting
@@ -90,30 +155,16 @@ npm run format
 
 ```bash
 cd backend
-ruff check .
-ruff format .
-black .
+make lint
+make format
 ```
 
-## API endpoints
+## Infrastructure assets
 
-- `POST /api/chat/session`: Creates a new session and returns `session_id`.
-- `POST /api/chat/message`: Accepts `session_id`, `message`, and optional `history`, then returns updated transcript plus optional `magic_link_script` payload (script content + checksum/version metadata).
-- `GET /health`: Basic service health check.
+Infra templates and scripts live under `infra/` for static frontend hosting and AWS infrastructure scaffolding.
 
-## Bedrock policy generation configuration
+## Notes and limitations
 
-The backend `InMemorySessionStore` calls `BedrockClient.generate_policy_from_functions` when a user message asks for policy generation.
-
-Set **one** of these model ID configuration options:
-
-- `BEDROCK_MODEL_ID` (direct value).
-- `BEDROCK_MODEL_ID_PARAMETER` (SSM Parameter Store name containing the model ID).
-- `BEDROCK_MODEL_ID_SECRET_ID` (+ optional `BEDROCK_MODEL_ID_SECRET_KEY`, default `model_id`) for Secrets Manager.
-
-Optional operational settings:
-
-- `POLICY_GENERATION_DLQ_URL` to send failed synchronous policy-generation events to SQS for offline triage/replay.
-- `BEDROCK_MAX_ATTEMPTS` to control synchronous Bedrock retries in-path (defaults to 2).
-
-See `infra/lambda_iam_policy_example.json` for least-privilege IAM granting `bedrock:InvokeModel` only on approved model ARNs.
+- Session state is **in-memory**; restarting the backend clears active sessions.
+- CORS is currently permissive (`*`) in backend app setup.
+- Bedrock integration is optional and only used when policy generation is requested.
