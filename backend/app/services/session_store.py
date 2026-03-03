@@ -74,21 +74,35 @@ class InMemorySessionStore:
 
         session.workflow_message = None
         lowered_message = user_message.lower()
+        stripped_message = user_message.strip()
+
+        maybe_account_id = self._extract_account_id(user_message)
+        maybe_role_arn = self._extract_role_arn(user_message)
+
+        if (
+            not session.required_functions
+            and stripped_message
+            and not maybe_account_id
+            and not maybe_role_arn
+            and not self._looks_like_duration_input(user_message)
+        ):
+            session.required_functions = [
+                item.strip()
+                for item in re.split(r"[\n,]", user_message)
+                if item.strip()
+            ]
 
         if "required_functions" in lowered_message:
             session.required_functions = [
                 item.strip() for item in user_message.split(",") if item.strip()
             ]
 
-        if "target account" in lowered_message or "account id" in lowered_message:
-            maybe_account_id = self._extract_account_id(user_message)
-            if maybe_account_id:
-                session.target_account_id = maybe_account_id
-                session.workflow_message = (
-                    "Create the contractor role in AWS, then send me the role ARN."
-                )
+        if maybe_account_id:
+            session.target_account_id = maybe_account_id
+            session.workflow_message = (
+                "Create the contractor role in AWS, then send me the role ARN."
+            )
 
-        maybe_role_arn = self._extract_role_arn(user_message)
         if maybe_role_arn:
             session.role_arn = maybe_role_arn
             session.workflow_message = (
@@ -101,15 +115,16 @@ class InMemorySessionStore:
                 "for example arn:aws:iam::123456789012:role/ContractorRole."
             )
 
-        maybe_duration_seconds = self._extract_duration_seconds(user_message)
-        if maybe_duration_seconds is not None:
-            if MIN_SESSION_DURATION_SECONDS <= maybe_duration_seconds <= MAX_SESSION_DURATION_SECONDS:
-                session.session_duration_seconds = maybe_duration_seconds
-            else:
-                session.workflow_message = (
-                    "Session duration must be between "
-                    f"{MIN_SESSION_DURATION_SECONDS} and {MAX_SESSION_DURATION_SECONDS} seconds."
-                )
+        if session.role_arn:
+            maybe_duration_seconds = self._extract_duration_seconds(user_message)
+            if maybe_duration_seconds is not None:
+                if MIN_SESSION_DURATION_SECONDS <= maybe_duration_seconds <= MAX_SESSION_DURATION_SECONDS:
+                    session.session_duration_seconds = maybe_duration_seconds
+                else:
+                    session.workflow_message = (
+                        "Session duration must be between "
+                        f"{MIN_SESSION_DURATION_SECONDS} and {MAX_SESSION_DURATION_SECONDS} seconds."
+                    )
 
         if "policy" in lowered_message:
             policy = self._generate_policy(session, user_message)
@@ -142,13 +157,26 @@ class InMemorySessionStore:
         return None
 
     def _extract_duration_seconds(self, user_message: str) -> int | None:
-        if "duration" not in user_message.lower():
+        if not self._looks_like_duration_input(user_message):
             return None
 
         match = re.search(r"\b(\d{3,5})\b", user_message)
         if not match:
             return None
         return int(match.group(1))
+
+    def _looks_like_duration_input(self, user_message: str) -> bool:
+        lowered_message = user_message.lower()
+        stripped_message = user_message.strip()
+        if not stripped_message:
+            return False
+
+        if re.fullmatch(r"\d{3,5}", stripped_message):
+            return True
+
+        has_duration_cue = "duration" in lowered_message or "seconds" in lowered_message
+        has_duration_number = re.search(r"\b\d{3,5}\b", user_message) is not None
+        return has_duration_cue and has_duration_number
 
     def _emit_metric(self, metric_name: str, value: int, outcome: str) -> None:
         metric_log = {

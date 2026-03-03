@@ -94,6 +94,27 @@ def test_account_id_prompted_for_role_arn():
     assert updated.workflow_message == "Create the contractor role in AWS, then send me the role ARN."
 
 
+def test_account_id_is_extracted_without_marker_phrase():
+    store = InMemorySessionStore()
+    session = store.create_session()
+
+    updated = store.update_from_message(session.session_id, "123456789012")
+
+    assert updated.target_account_id == "123456789012"
+
+
+def test_plain_text_work_description_populates_required_functions():
+    store = InMemorySessionStore()
+    session = store.create_session()
+
+    updated = store.update_from_message(
+        session.session_id,
+        "ListUsers, GetRole\nAssumeRole",
+    )
+
+    assert updated.required_functions == ["ListUsers", "GetRole", "AssumeRole"]
+
+
 def test_invalid_role_arn_sets_validation_error():
     store = InMemorySessionStore()
     session = store.create_session()
@@ -135,3 +156,18 @@ def test_duration_capture_generates_script_with_selected_default():
 
     assert updated.magic_link_script is not None
     assert "DEFAULT_DURATION_SECONDS = 1800" in updated.magic_link_script
+
+
+def test_numeric_duration_message_is_accepted_after_role_arn():
+    store = InMemorySessionStore()
+    session = store.create_session()
+    store.update_from_message(session.session_id, "required_functions, ListBuckets")
+    store.update_from_message(session.session_id, "target account 123456789012")
+    store.update_from_message(
+        session.session_id,
+        "arn:aws:iam::123456789012:role/ContractorRole",
+    )
+
+    updated = store.update_from_message(session.session_id, "1800")
+
+    assert updated.session_duration_seconds == 1800
