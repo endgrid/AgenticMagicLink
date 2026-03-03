@@ -77,14 +77,68 @@ class InMemorySessionStore:
             session.generated_policy_json = json.dumps(policy) if policy else None
 
         if "script" in user_message.lower() or "magic link" in user_message.lower():
-            script_content = generate_magic_link_script()
-            session.magic_link_script = script_content
-            session.magic_link_script_checksum_sha256 = hashlib.sha256(
-                script_content.encode("utf-8")
-            ).hexdigest()
-            session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
+            self._set_magic_link_script(session)
+
+        role_details_provided = self._contains_role_details(user_message)
+        if role_details_provided and session.target_account_id:
+            self._set_magic_link_script(session)
+
+        session.next_assistant_prompt = self._build_next_assistant_prompt(
+            session, role_details_provided
+        )
 
         return session
+
+    def _contains_role_details(self, user_message: str) -> bool:
+        normalized_message = user_message.lower()
+        return any(
+            marker in normalized_message
+            for marker in (
+                "arn:aws:iam::",
+                "role arn",
+                "role name",
+                "role/",
+            )
+        )
+
+    def _set_magic_link_script(self, session: SessionState) -> None:
+        if session.magic_link_script:
+            return
+
+        script_content = generate_magic_link_script()
+        session.magic_link_script = script_content
+        session.magic_link_script_checksum_sha256 = hashlib.sha256(
+            script_content.encode("utf-8")
+        ).hexdigest()
+        session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
+
+    def _build_next_assistant_prompt(
+        self,
+        session: SessionState,
+        role_details_provided: bool,
+    ) -> str:
+        if not session.required_functions:
+            return "Thanks! Please list the AWS services or operations your workload needs."
+
+        if not session.target_account_id:
+            return "Got it. Please share your 12-digit AWS account ID so I can scope the setup."
+
+        if session.magic_link_script:
+            return (
+                "Great — I generated your magic-link script payload. Save it to a file, "
+                "run it with your preferred shell, then follow the prompts to finish setup."
+            )
+
+        if role_details_provided:
+            return (
+                "Thanks for sharing the role details. I can generate the magic-link script once "
+                "the role trust/policy is confirmed."
+            )
+
+        return (
+            "Next, create an IAM role in your AWS account and share the role ARN or role name "
+            "here so I can generate the magic-link script."
+        )
 
     def _emit_metric(self, metric_name: str, value: int, outcome: str) -> None:
         metric_log = {
