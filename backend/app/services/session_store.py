@@ -1,12 +1,30 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
+import os
+import time
 import uuid
 
 import boto3
 
 from app.models.session import SessionState
+from src.bedrock_client import (
+    BedrockClient,
+    BedrockConfigurationError,
+    BedrockInvocationError,
+    BedrockOutputError,
+)
 from src.magic_link_script import MAGIC_LINK_SCRIPT_VERSION, generate_magic_link_script
+
+logger = logging.getLogger(__name__)
+
+
+class PolicyFailureDLQ:
+    def __init__(self, queue_url: str | None = None, sqs_client: object | None = None) -> None:
+        self.queue_url = queue_url or os.getenv("POLICY_FAILURE_DLQ_URL")
+        self._sqs_client = sqs_client
 
     def enqueue(self, payload: dict[str, object]) -> None:
         if not self.queue_url:
@@ -15,9 +33,8 @@ from src.magic_link_script import MAGIC_LINK_SCRIPT_VERSION, generate_magic_link
         sqs_client = self._sqs_client or boto3.client("sqs")
         sqs_client.send_message(QueueUrl=self.queue_url, MessageBody=json.dumps(payload))
 
-from ..models.session import SessionState
 
-
+class InMemorySessionStore:
     def __init__(
         self,
         *,
@@ -30,17 +47,16 @@ from ..models.session import SessionState
 
     def create_session(self) -> SessionState:
         session = SessionState(session_id=str(uuid.uuid4()))
-        return self._repository.create_session(session)
+        self._sessions[session.session_id] = session
+        return session
 
     def get_session(self, session_id: str) -> SessionState | None:
-        return self._repository.get_session(session_id)
+        return self._sessions.get(session_id)
 
     def update_from_message(self, session_id: str, user_message: str) -> SessionState:
-        session = self._repository.get_session(session_id)
+        session = self.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
-
-        original_version = session.version
 
         if "required_functions" in user_message.lower():
             session.required_functions = [
