@@ -1,6 +1,6 @@
 # Infrastructure
 
-This folder defines the currently scoped infrastructure for static frontend hosting and deployment.
+This folder defines infrastructure for static frontend hosting and deployment on AWS.
 
 ## AWS services used (auditable scope)
 
@@ -13,7 +13,6 @@ This infra package does **not** provision "all AWS services." It only provisions
 | AWS CloudFormation | Required (for this deployment path) | Provision S3 + CloudFront hosting resources from template. | `infra/cloudformation/frontend-static-site.yaml` and deployment commands in this README. |
 | Amazon API Gateway | Optional/external dependency | Acts as the backend API URL injected into the frontend build (`API_BASE_URL`), but is not provisioned in this folder. | Referenced by `API_BASE_URL` in `infra/scripts/deploy_frontend.sh`. |
 | Amazon Cognito | Optional (future) | Not used in current baseline; listed as a future extension for authenticated APIs. | Described only in the "Identity and authorization" section of this README. |
-| Amazon DynamoDB | Optional (future) | Not used by this frontend hosting stack; placeholder session table template exists for future backend persistence. | `infra/dynamodb-sessions.yaml`. |
 
 ## Frontend static hosting resources
 
@@ -69,7 +68,7 @@ bash infra/scripts/deploy_frontend.sh
 
 The frontend reads `VITE_API_BASE_URL` at build time in `frontend/src/api.ts`.
 
-If unset, it defaults to `http://localhost:8000` for local development.
+`VITE_API_BASE_URL` must be set for deployment builds.
 
 ### Frontend dependency contract
 
