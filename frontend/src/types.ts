@@ -1,6 +1,6 @@
 export type Role = 'user' | 'assistant';
 
-export type NextExpectedInput = 'work_description' | 'account_id' | 'role_arn';
+export type NextExpectedInput = 'work_description' | 'account_id' | 'role_arn' | 'session_duration';
 
 export interface ChatMessage {
   role: Role;
@@ -9,6 +9,8 @@ export interface ChatMessage {
 
 export interface SessionResponse {
   session_id: string;
+  initial_assistant_message?: string | null;
+  next_expected_input?: NextExpectedInput | null;
 }
 
 export interface MagicLinkScriptPayload {

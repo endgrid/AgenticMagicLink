@@ -6,21 +6,8 @@ const NEXT_INPUT_HELPER: Record<NextExpectedInput, string> = {
   work_description: 'Expected input: describe the IAM work you need done.',
   account_id: 'Expected input: provide the 12-digit AWS account ID.',
   role_arn: 'Expected input: provide the IAM role ARN to assume.',
+  session_duration: 'Expected input: provide session duration in seconds (900 to 43200).',
 };
-
-function inferExpectedInputFromAssistant(messages: ChatMessage[]): NextExpectedInput | null {
-  const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
-  if (!lastAssistant) return null;
-
-  const assistantText = lastAssistant.content.toLowerCase();
-  if (assistantText.includes('account id')) return 'account_id';
-  if (assistantText.includes('role arn')) return 'role_arn';
-  if (assistantText.includes('describe the iam workflow') || assistantText.includes('required_functions')) {
-    return 'work_description';
-  }
-
-  return null;
-}
 
 function App() {
   const [sessionId, setSessionId] = useState<string>('');
@@ -36,6 +23,11 @@ function App() {
       try {
         const session = await createSession();
         setSessionId(session.session_id);
+        setNextExpectedInput(session.next_expected_input ?? null);
+
+        if (session.initial_assistant_message) {
+          setMessages([{ role: 'assistant', content: session.initial_assistant_message }]);
+        }
       } catch (sessionError) {
         setError((sessionError as Error).message);
       }
@@ -68,9 +60,9 @@ function App() {
   };
 
   const composerHelper = useMemo(() => {
-    const expectedInput = nextExpectedInput ?? inferExpectedInputFromAssistant(messages);
-    return expectedInput ? NEXT_INPUT_HELPER[expectedInput] : null;
-  }, [messages, nextExpectedInput]);
+    if (!nextExpectedInput) return null;
+    return NEXT_INPUT_HELPER[nextExpectedInput];
+  }, [nextExpectedInput]);
 
   return (
     <main className="chat-shell">
@@ -81,7 +73,7 @@ function App() {
 
       <section className="messages" aria-live="polite">
         {messages.length === 0 ? (
-          <p className="placeholder">Start by describing the IAM workflow you need.</p>
+          <p className="placeholder">No messages yet.</p>
         ) : (
           messages.map((message, index) => (
             <article key={`${message.role}-${index}`} className={`message ${message.role}`}>

@@ -10,6 +10,8 @@ class ChatMessage(BaseModel):
 
 class SessionResponse(BaseModel):
     session_id: str
+    initial_assistant_message: str | None = None
+    next_expected_input: Literal["work_description", "account_id", "role_arn", "session_duration"] | None = None
 
 
 class MagicLinkScriptPayload(BaseModel):
