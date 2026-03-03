@@ -70,7 +70,7 @@ resource "aws_apigatewayv2_api" "chat_http_api" {
   protocol_type = "HTTP"
 
   cors_configuration {
-    allow_credentials = true
+    allow_credentials = false
     allow_headers     = ["*"]
     allow_methods     = ["*"]
     allow_origins     = ["*"]
