@@ -1,6 +1,6 @@
 export type Role = 'user' | 'assistant';
 
-export type NextExpectedInput = 'work_description' | 'account_id' | 'role_arn';
+export type NextExpectedInput = 'work_description' | 'account_id' | 'role_arn' | 'session_duration';
 
 export interface ChatMessage {
   role: Role;
