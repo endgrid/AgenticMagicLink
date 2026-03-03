@@ -9,6 +9,8 @@ export interface ChatMessage {
 
 export interface SessionResponse {
   session_id: string;
+  initial_assistant_message?: string | null;
+  next_expected_input?: NextExpectedInput | null;
 }
 
 export interface MagicLinkScriptPayload {

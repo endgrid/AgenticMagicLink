@@ -1,6 +1,11 @@
 import json
 
-from backend.app.application.chat_service import SessionNotFoundError, build_message_response, create_session_response
+from backend.app.application.chat_service import (
+    SessionNotFoundError,
+    build_initial_assistant_message,
+    build_message_response,
+    create_session_response,
+)
 from backend.app.lambda_handlers.chat import post_message_handler
 from backend.app.models.chat import ChatMessage, MessageRequest
 from backend.app.services.session_store import InMemorySessionStore
@@ -12,6 +17,8 @@ def test_create_session_response_returns_session_id():
     response = create_session_response(store)
 
     assert response.session_id
+    assert response.initial_assistant_message == build_initial_assistant_message()
+    assert response.next_expected_input == "work_description"
     assert store.get_session(response.session_id) is not None
 
 
