@@ -4,7 +4,13 @@ import type { ChatMessage } from './types';
 
 function App() {
   const [sessionId, setSessionId] = useState<string>('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      role: 'assistant',
+      content:
+        "Hello, I'm the Contractor Access Agent. Please describe the work your contractor will be doing and the services they will need access to?",
+    },
+  ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
