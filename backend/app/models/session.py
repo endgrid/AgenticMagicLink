@@ -10,6 +10,7 @@ class SessionState:
     required_functions: List[str] = field(default_factory=list)
     target_account_id: str | None = None
     generated_policy_json: str | None = None
+    next_assistant_prompt: str | None = None
     magic_link_script: str | None = None
     magic_link_script_checksum_sha256: str | None = None
     magic_link_script_version: str | None = None
