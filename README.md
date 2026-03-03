@@ -16,7 +16,7 @@ This repository now uses a monorepo layout with a React chat frontend and a Fast
 4. The backend updates in-memory state fields:
    - `required_functions`
    - `target_account_id`
-   - `generated_policy_json`
+   - `generated_policy_json` (generated via Amazon Bedrock when policy generation is requested)
    - `magic_link_script`
 5. The backend responds with full message history including assistant summary.
 
@@ -73,9 +73,20 @@ black .
 - `POST /api/chat/message`: Accepts `session_id`, `message`, and optional `history`, then returns updated transcript.
 - `GET /health`: Basic service health check.
 
-## Frontend AWS deployment
 
-Use `infra/cloudformation/frontend-static-site.yaml` to provision a private S3 static origin with CloudFront, then run `infra/scripts/deploy_frontend.sh` to build `frontend/` and publish the generated artifacts.
+## Bedrock policy generation configuration
 
-Set `API_BASE_URL` when running the deploy script to inject the API Gateway URL into `VITE_API_BASE_URL` at build time.
+The backend `InMemorySessionStore` now calls `BedrockClient.generate_policy_from_functions` when a user message asks for policy generation.
 
+Set **one** of these model ID configuration options:
+
+- `BEDROCK_MODEL_ID` (direct value).
+- `BEDROCK_MODEL_ID_PARAMETER` (SSM Parameter Store name containing the model ID).
+- `BEDROCK_MODEL_ID_SECRET_ID` (+ optional `BEDROCK_MODEL_ID_SECRET_KEY`, default `model_id`) for Secrets Manager.
+
+Optional operational settings:
+
+- `POLICY_GENERATION_DLQ_URL` to send failed synchronous policy-generation events to SQS for offline triage/replay.
+- `BEDROCK_MAX_ATTEMPTS` to control synchronous Bedrock retries in-path (defaults to 2).
+
+See `infra/lambda_iam_policy_example.json` for least-privilege IAM granting `bedrock:InvokeModel` only on approved model ARNs.

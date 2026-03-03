@@ -1,10 +1,13 @@
 import json
+import logging
 import os
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+
+logger = logging.getLogger(__name__)
 
 
 class BedrockError(Exception):
@@ -28,19 +31,16 @@ class BedrockClient:
     model_id: str
     runtime_client: Any
     max_attempts: int = 2
+    last_attempts_used: int = field(default=0, init=False)
 
     @classmethod
     def from_env(
         cls,
         *,
-        boto3_session: Optional[Any] = None,
-        runtime_client: Optional[Any] = None,
+        boto3_session: Any | None = None,
+        runtime_client: Any | None = None,
         max_attempts: int = 2,
     ) -> "BedrockClient":
-        model_id = os.getenv("BEDROCK_MODEL_ID")
-        if not model_id:
-            raise BedrockConfigurationError("BEDROCK_MODEL_ID environment variable is required.")
-
         session = boto3_session or boto3.session.Session()
 
         region = session.region_name
@@ -55,20 +55,90 @@ class BedrockClient:
                 "AWS credentials are not configured for Bedrock runtime access."
             )
 
+        model_id = cls._resolve_model_id(session)
+
         try:
             client = runtime_client or session.client("bedrock-runtime", region_name=region)
         except Exception as exc:  # pragma: no cover - defensive client creation guard
-            raise BedrockConfigurationError(f"Failed to initialize bedrock-runtime client: {exc}") from exc
+            message = f"Failed to initialize bedrock-runtime client: {exc}"
+            raise BedrockConfigurationError(message) from exc
 
         return cls(model_id=model_id, runtime_client=client, max_attempts=max_attempts)
 
-    def generate_policy_from_functions(self, functions_text: str) -> Dict[str, Any]:
+    @staticmethod
+    def _resolve_model_id(session: Any) -> str:
+        direct_model_id = os.getenv("BEDROCK_MODEL_ID")
+        if direct_model_id:
+            return direct_model_id
+
+        model_id_param_name = os.getenv("BEDROCK_MODEL_ID_PARAMETER")
+        if model_id_param_name:
+            try:
+                ssm_client = session.client("ssm")
+                response = ssm_client.get_parameter(Name=model_id_param_name, WithDecryption=True)
+            except (BotoCoreError, ClientError) as exc:
+                message = (
+                    "Failed to load model ID from SSM parameter "
+                    f"'{model_id_param_name}': {exc}"
+                )
+                raise BedrockConfigurationError(message) from exc
+
+            model_id = response.get("Parameter", {}).get("Value", "").strip()
+            if model_id:
+                return model_id
+
+            raise BedrockConfigurationError(
+                f"SSM parameter '{model_id_param_name}' did not contain a model ID value."
+            )
+
+        model_id_secret_id = os.getenv("BEDROCK_MODEL_ID_SECRET_ID")
+        if model_id_secret_id:
+            secret_key = os.getenv("BEDROCK_MODEL_ID_SECRET_KEY", "model_id")
+
+            try:
+                secrets_client = session.client("secretsmanager")
+                response = secrets_client.get_secret_value(SecretId=model_id_secret_id)
+            except (BotoCoreError, ClientError) as exc:
+                message = (
+                    "Failed to load model ID from Secrets Manager secret "
+                    f"'{model_id_secret_id}': {exc}"
+                )
+                raise BedrockConfigurationError(message) from exc
+
+            secret_value = response.get("SecretString", "")
+            if not secret_value:
+                raise BedrockConfigurationError(
+                    f"Secret '{model_id_secret_id}' did not contain a SecretString payload."
+                )
+
+            try:
+                payload = json.loads(secret_value)
+            except json.JSONDecodeError as exc:
+                if secret_value.strip():
+                    return secret_value.strip()
+                message = f"Secret '{model_id_secret_id}' did not contain a usable model ID."
+                raise BedrockConfigurationError(message) from exc
+
+            model_id = str(payload.get(secret_key, "")).strip()
+            if not model_id:
+                raise BedrockConfigurationError(
+                    f"Secret '{model_id_secret_id}' is missing key '{secret_key}' for model ID."
+                )
+
+            return model_id
+
+        raise BedrockConfigurationError(
+            "Provide BEDROCK_MODEL_ID, BEDROCK_MODEL_ID_PARAMETER, or BEDROCK_MODEL_ID_SECRET_ID."
+        )
+
+    def generate_policy_from_functions(self, functions_text: str) -> dict[str, Any]:
         if not functions_text or not functions_text.strip():
             raise ValueError("functions_text must be non-empty.")
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in range(1, self.max_attempts + 1):
+            self.last_attempts_used = attempt
             prompt = self._build_prompt(functions_text, retry=attempt > 1)
 
             try:
@@ -78,6 +148,14 @@ class BedrockClient:
                 return policy
             except (BedrockInvocationError, BedrockOutputError) as exc:
                 last_error = exc
+                logger.warning(
+                    "bedrock_policy_generation_attempt_failed",
+                    extra={
+                        "attempt": attempt,
+                        "max_attempts": self.max_attempts,
+                        "error": str(exc),
+                    },
+                )
                 if attempt >= self.max_attempts:
                     raise
 
@@ -126,7 +204,8 @@ class BedrockClient:
         try:
             payload = json.loads(response["body"].read())
         except Exception as exc:
-            raise BedrockInvocationError(f"Failed to parse Bedrock response payload: {exc}") from exc
+            message = f"Failed to parse Bedrock response payload: {exc}"
+            raise BedrockInvocationError(message) from exc
 
         text = self._extract_text_from_payload(payload)
         if not text:
@@ -134,7 +213,7 @@ class BedrockClient:
 
         return text
 
-    def _extract_text_from_payload(self, payload: Dict[str, Any]) -> str:
+    def _extract_text_from_payload(self, payload: dict[str, Any]) -> str:
         content = payload.get("content", [])
         if isinstance(content, list):
             chunks = [item.get("text", "") for item in content if isinstance(item, dict)]
@@ -142,7 +221,7 @@ class BedrockClient:
 
         return ""
 
-    def _extract_policy(self, model_output: str) -> Dict[str, Any]:
+    def _extract_policy(self, model_output: str) -> dict[str, Any]:
         candidate = model_output.strip()
 
         if "```" in candidate:
@@ -156,7 +235,7 @@ class BedrockClient:
         except json.JSONDecodeError as exc:
             raise BedrockOutputError(f"Model output was not valid JSON: {exc}") from exc
 
-    def _validate_policy(self, policy: Dict[str, Any]) -> None:
+    def _validate_policy(self, policy: dict[str, Any]) -> None:
         if not isinstance(policy, dict):
             raise BedrockOutputError("Model output must be a JSON object.")
 
