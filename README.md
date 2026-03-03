@@ -72,3 +72,10 @@ black .
 - `POST /api/chat/session`: Creates a new session and returns `session_id`.
 - `POST /api/chat/message`: Accepts `session_id`, `message`, and optional `history`, then returns updated transcript.
 - `GET /health`: Basic service health check.
+
+## Frontend AWS deployment
+
+Use `infra/cloudformation/frontend-static-site.yaml` to provision a private S3 static origin with CloudFront, then run `infra/scripts/deploy_frontend.sh` to build `frontend/` and publish the generated artifacts.
+
+Set `API_BASE_URL` when running the deploy script to inject the API Gateway URL into `VITE_API_BASE_URL` at build time.
+
