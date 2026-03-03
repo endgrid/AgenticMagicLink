@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 import uuid
 
@@ -47,7 +48,10 @@ class InMemorySessionStore:
         self._failure_dlq = failure_dlq or PolicyFailureDLQ()
 
     def create_session(self) -> SessionState:
-        session = SessionState(session_id=str(uuid.uuid4()))
+        session = SessionState(
+            session_id=str(uuid.uuid4()),
+            conversation_stage="awaiting_work_description",
+        )
         self._sessions[session.session_id] = session
         return session
 
@@ -59,86 +63,94 @@ class InMemorySessionStore:
         if session is None:
             raise KeyError(session_id)
 
-        if "required_functions" in user_message.lower():
-            session.required_functions = [
-                item.strip() for item in user_message.split(",") if item.strip()
-            ]
+        lowered_message = user_message.lower()
 
-        if "target account" in user_message.lower():
-            tokens = user_message.split()
-            maybe_account_id = next(
-                (token for token in tokens if token.isdigit() and len(token) == 12), None
+        if session.conversation_stage == "awaiting_work_description":
+            inferred_services = self._infer_required_services(user_message)
+            session.contractor_work_summary = user_message.strip()
+            session.required_functions = inferred_services
+            session.required_services = inferred_services
+            session.conversation_stage = "awaiting_account_id"
+            session.latest_assistant_prompt = (
+                "Thanks — I captured the requested work and inferred service requirements. "
+                "Please provide the 12-digit AWS account ID to target."
             )
-            if maybe_account_id:
-                session.target_account_id = maybe_account_id
 
-        if "policy" in user_message.lower():
-            policy = self._generate_policy(session, user_message)
-            session.generated_policy_json = json.dumps(policy) if policy else None
+            if "policy" in lowered_message:
+                policy = self._generate_policy(session, user_message)
+                session.generated_policy_json = json.dumps(policy) if policy else None
 
-        if "script" in user_message.lower() or "magic link" in user_message.lower():
-            self._set_magic_link_script(session)
+            return session
 
-        role_details_provided = self._contains_role_details(user_message)
-        if role_details_provided and session.target_account_id:
-            self._set_magic_link_script(session)
+        if session.conversation_stage == "awaiting_account_id":
+            maybe_account_id = self._extract_account_id(user_message)
+            if maybe_account_id is None:
+                session.latest_assistant_prompt = (
+                    "I couldn't find a valid AWS account ID. "
+                    "Please send a 12-digit account ID (numbers only)."
+                )
+                return session
 
-        session.next_assistant_prompt = self._build_next_assistant_prompt(
-            session, role_details_provided
-        )
+            session.target_account_id = maybe_account_id
+            session.conversation_stage = "awaiting_role_info"
+            session.latest_assistant_prompt = (
+                "Great. What IAM role name should the magic link assume in that account?"
+            )
+            return session
+
+        if session.conversation_stage == "awaiting_role_info":
+            role_name = user_message.strip()
+            if not role_name:
+                session.latest_assistant_prompt = (
+                    "Please provide a role name such as OrganizationAccountAccessRole."
+                )
+                return session
+
+            session.role_name = role_name
+            session.conversation_stage = "ready_to_generate_script"
+
+        if (
+            session.conversation_stage == "ready_to_generate_script"
+            and session.target_account_id
+            and session.role_name
+        ):
+            script_content = generate_magic_link_script()
+            session.magic_link_script = script_content
+            session.magic_link_script_checksum_sha256 = hashlib.sha256(
+                script_content.encode("utf-8")
+            ).hexdigest()
+            session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
+            session.conversation_stage = "completed"
+            session.latest_assistant_prompt = (
+                "Done — I generated the magic link script using the captured requirements, "
+                "account ID, and role name."
+            )
 
         return session
 
-    def _contains_role_details(self, user_message: str) -> bool:
-        normalized_message = user_message.lower()
-        return any(
-            marker in normalized_message
-            for marker in (
-                "arn:aws:iam::",
-                "role arn",
-                "role name",
-                "role/",
-            )
-        )
+    def _extract_account_id(self, text: str) -> str | None:
+        match = re.search(r"\b(\d{12})\b", text)
+        if not match:
+            return None
+        return match.group(1)
 
-    def _set_magic_link_script(self, session: SessionState) -> None:
-        if session.magic_link_script:
-            return
-
-        script_content = generate_magic_link_script()
-        session.magic_link_script = script_content
-        session.magic_link_script_checksum_sha256 = hashlib.sha256(
-            script_content.encode("utf-8")
-        ).hexdigest()
-        session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
-
-    def _build_next_assistant_prompt(
-        self,
-        session: SessionState,
-        role_details_provided: bool,
-    ) -> str:
-        if not session.required_functions:
-            return "Thanks! Please list the AWS services or operations your workload needs."
-
-        if not session.target_account_id:
-            return "Got it. Please share your 12-digit AWS account ID so I can scope the setup."
-
-        if session.magic_link_script:
-            return (
-                "Great — I generated your magic-link script payload. Save it to a file, "
-                "run it with your preferred shell, then follow the prompts to finish setup."
-            )
-
-        if role_details_provided:
-            return (
-                "Thanks for sharing the role details. I can generate the magic-link script once "
-                "the role trust/policy is confirmed."
-            )
-
-        return (
-            "Next, create an IAM role in your AWS account and share the role ARN or role name "
-            "here so I can generate the magic-link script."
-        )
+    def _infer_required_services(self, user_message: str) -> list[str]:
+        service_keywords = {
+            "s3": ["s3", "bucket", "object storage"],
+            "ec2": ["ec2", "instance", "compute"],
+            "lambda": ["lambda", "serverless", "function"],
+            "iam": ["iam", "role", "policy", "permission"],
+            "dynamodb": ["dynamodb", "nosql", "table"],
+            "rds": ["rds", "database", "sql"],
+            "cloudwatch": ["cloudwatch", "logs", "metrics"],
+        }
+        lowered = user_message.lower()
+        inferred = [
+            service
+            for service, keywords in service_keywords.items()
+            if any(keyword in lowered for keyword in keywords)
+        ]
+        return inferred
 
     def _emit_metric(self, metric_name: str, value: int, outcome: str) -> None:
         metric_log = {

@@ -7,8 +7,13 @@ from typing import List
 @dataclass
 class SessionState:
     session_id: str
+    conversation_stage: str = "awaiting_work_description"
+    contractor_work_summary: str | None = None
     required_functions: List[str] = field(default_factory=list)
+    required_services: List[str] = field(default_factory=list)
     target_account_id: str | None = None
+    role_name: str | None = None
+    latest_assistant_prompt: str | None = None
     generated_policy_json: str | None = None
     next_assistant_prompt: str | None = None
     magic_link_script: str | None = None

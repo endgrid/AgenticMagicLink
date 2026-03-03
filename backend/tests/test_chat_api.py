@@ -10,8 +10,12 @@ class SessionStoreMagicLinkPayloadTest(unittest.TestCase):
         store = InMemorySessionStore()
         session = store.create_session()
 
+        store.update_from_message(
+            session.session_id, "I need S3 read access for contractor reporting work"
+        )
+        store.update_from_message(session.session_id, "123456789012")
         updated = store.update_from_message(
-            session.session_id, "Please create a magic link script for me"
+            session.session_id, "OrganizationAccountAccessRole"
         )
 
         expected_script = generate_magic_link_script()
