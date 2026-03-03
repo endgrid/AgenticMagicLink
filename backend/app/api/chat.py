@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException
 
-from app.models.chat import ChatMessage, MessageRequest, MessageResponse, SessionResponse
-from app.services.session_store import InMemorySessionStore
+from ..models.chat import ChatMessage, MessageRequest, MessageResponse, SessionResponse
+from ..services.session_store import ConcurrencyError, SessionService
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
-store = InMemorySessionStore()
+store = SessionService.from_env()
 
 
 @router.post("/session", response_model=SessionResponse)
@@ -19,7 +19,10 @@ def chat_message(payload: MessageRequest) -> MessageResponse:
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    updated_session = store.update_from_message(payload.session_id, payload.message)
+    try:
+        updated_session = store.update_from_message(payload.session_id, payload.message)
+    except ConcurrencyError as exc:
+        raise HTTPException(status_code=409, detail="Session update conflict, retry request") from exc
 
     assistant_text = (
         "Captured workflow state:\n"
