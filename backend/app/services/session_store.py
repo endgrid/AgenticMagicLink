@@ -51,7 +51,10 @@ class InMemorySessionStore:
         self._failure_dlq = failure_dlq or PolicyFailureDLQ()
 
     def create_session(self) -> SessionState:
-        session = SessionState(session_id=str(uuid.uuid4()))
+        session = SessionState(
+            session_id=str(uuid.uuid4()),
+            conversation_stage="awaiting_work_description",
+        )
         self._sessions[session.session_id] = session
         return session
 
@@ -81,9 +84,9 @@ class InMemorySessionStore:
         if "arn:aws:iam::" in user_message:
             self._capture_role_arn(session, user_message)
 
-        if "policy" in user_message.lower():
-            policy = self._generate_policy(session, user_message)
-            session.generated_policy_json = json.dumps(policy) if policy else None
+            if "policy" in lowered_message:
+                policy = self._generate_policy(session, user_message)
+                session.generated_policy_json = json.dumps(policy) if policy else None
 
         if (
             session.target_account_id
