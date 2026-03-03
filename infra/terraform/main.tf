@@ -35,6 +35,36 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+resource "aws_dynamodb_table" "sessions" {
+  name         = "${var.project_name}-sessions"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "session_id"
+
+  attribute {
+    name = "session_id"
+    type = "S"
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_session_store" {
+  name = "${var.project_name}-lambda-session-store"
+  role = aws_iam_role.lambda_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem"
+        ]
+        Resource = aws_dynamodb_table.sessions.arn
+      }
+    ]
+  })
+}
+
 resource "aws_lambda_function" "post_session" {
   function_name = "${var.project_name}-post-session"
   role          = aws_iam_role.lambda_exec.arn
@@ -45,7 +75,8 @@ resource "aws_lambda_function" "post_session" {
 
   environment {
     variables = {
-      BEDROCK_MODEL_ID = var.bedrock_model_id
+      BEDROCK_MODEL_ID   = var.bedrock_model_id
+      SESSION_TABLE_NAME = aws_dynamodb_table.sessions.name
     }
   }
 }
@@ -60,7 +91,8 @@ resource "aws_lambda_function" "post_message" {
 
   environment {
     variables = {
-      BEDROCK_MODEL_ID = var.bedrock_model_id
+      BEDROCK_MODEL_ID   = var.bedrock_model_id
+      SESSION_TABLE_NAME = aws_dynamodb_table.sessions.name
     }
   }
 }
@@ -70,7 +102,7 @@ resource "aws_apigatewayv2_api" "chat_http_api" {
   protocol_type = "HTTP"
 
   cors_configuration {
-    allow_credentials = true
+    allow_credentials = false
     allow_headers     = ["*"]
     allow_methods     = ["*"]
     allow_origins     = ["*"]

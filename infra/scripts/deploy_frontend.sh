@@ -19,14 +19,16 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 echo "Installing frontend dependencies..."
-if [[ -f "$FRONTEND_DIR/package-lock.json" ]]; then
-  npm --prefix "$FRONTEND_DIR" ci
+pushd "$FRONTEND_DIR" >/dev/null
+if [[ -f "package-lock.json" ]]; then
+  npm ci
 else
-  npm --prefix "$FRONTEND_DIR" install
+  npm install
 fi
 
 echo "Building frontend with API endpoint: $API_BASE_URL"
-VITE_API_BASE_URL="$API_BASE_URL" npm --prefix "$FRONTEND_DIR" run build
+VITE_API_BASE_URL="$API_BASE_URL" npm run build
+popd >/dev/null
 
 echo "Syncing assets to s3://$S3_BUCKET_NAME"
 aws s3 sync "$FRONTEND_DIR/dist" "s3://$S3_BUCKET_NAME" --delete

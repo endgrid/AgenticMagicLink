@@ -31,7 +31,7 @@ sys.modules.setdefault("botocore.exceptions", botocore_exceptions_stub)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.services.session_store import InMemorySessionStore, PolicyFailureDLQ
+from app.services.session_store import DynamoDBSessionStore, InMemorySessionStore, PolicyFailureDLQ
 from src.bedrock_client import BedrockInvocationError
 
 
@@ -54,6 +54,29 @@ class FakeDLQ:
 
     def enqueue(self, payload):
         self.payloads.append(payload)
+
+
+class FakeDynamoTable:
+    def __init__(self):
+        self.items = {}
+
+    def put_item(self, Item):
+        self.items[Item["session_id"]] = dict(Item)
+        return {"ResponseMetadata": {"HTTPStatusCode": 200}}
+
+    def get_item(self, Key):
+        item = self.items.get(Key["session_id"])
+        if item is None:
+            return {}
+        return {"Item": dict(item)}
+
+
+class FakeDynamoResource:
+    def __init__(self, table):
+        self._table = table
+
+    def Table(self, _name):
+        return self._table
 
 
 def test_update_from_message_generates_policy_json():
@@ -214,3 +237,37 @@ def test_out_of_range_duration_shows_validation_and_skips_script_generation():
     assert updated.session_duration_seconds is None
     assert updated.magic_link_script is None
     assert "must be between 900 and 43200 seconds" in (updated.workflow_message or "")
+
+
+def test_dynamodb_store_persists_sessions_across_store_instances():
+    table = FakeDynamoTable()
+    resource = FakeDynamoResource(table)
+
+    creator_store = DynamoDBSessionStore(
+        table_name="sessions",
+        dynamodb_resource=resource,
+    )
+    reader_store = DynamoDBSessionStore(
+        table_name="sessions",
+        dynamodb_resource=resource,
+    )
+
+    session = creator_store.create_session()
+    creator_store.update_from_message(session.session_id, "Need read-only S3 access")
+
+    loaded = reader_store.get_session(session.session_id)
+
+    assert loaded is not None
+    assert loaded.required_functions == ["Need read-only S3 access"]
+
+
+def test_dynamodb_store_update_raises_for_missing_session():
+    table = FakeDynamoTable()
+    resource = FakeDynamoResource(table)
+    store = DynamoDBSessionStore(table_name="sessions", dynamodb_resource=resource)
+
+    try:
+        store.update_from_message("missing", "hello")
+        raise AssertionError("Expected KeyError")
+    except KeyError:
+        pass

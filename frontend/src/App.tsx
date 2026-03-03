@@ -9,23 +9,6 @@ const NEXT_INPUT_HELPER: Record<NextExpectedInput, string> = {
   session_duration: 'Expected input: provide a session duration in seconds (900-43200).',
 };
 
-function inferExpectedInputFromAssistant(messages: ChatMessage[]): NextExpectedInput | null {
-  const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
-  if (!lastAssistant) return null;
-
-  const assistantText = lastAssistant.content.toLowerCase();
-  if (assistantText.includes('account id')) return 'account_id';
-  if (assistantText.includes('role arn')) return 'role_arn';
-  if (assistantText.includes('session duration') || assistantText.includes('900 to 43200')) {
-    return 'session_duration';
-  }
-  if (assistantText.includes('describe the iam workflow') || assistantText.includes('required_functions')) {
-    return 'work_description';
-  }
-
-  return null;
-}
-
 function App() {
   const [sessionId, setSessionId] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);

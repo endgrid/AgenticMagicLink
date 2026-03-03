@@ -5,14 +5,14 @@ from backend.app.models.chat import (
     MessageResponse,
     SessionResponse,
 )
-from backend.app.services.session_store import InMemorySessionStore
+from backend.app.services.session_store import SessionStore
 
 
 class SessionNotFoundError(Exception):
     """Raised when message handling is attempted for an unknown session."""
 
 
-def create_session_response(store: InMemorySessionStore) -> SessionResponse:
+def create_session_response(store: SessionStore) -> SessionResponse:
     session = store.create_session()
     next_expected_input = "work_description"
     return SessionResponse(
@@ -91,7 +91,7 @@ def _build_assistant_prompt(
     )
 
 
-def build_message_response(payload: MessageRequest, store: InMemorySessionStore) -> MessageResponse:
+def build_message_response(payload: MessageRequest, store: SessionStore) -> MessageResponse:
     session = store.get_session(payload.session_id)
     if not session:
         raise SessionNotFoundError(payload.session_id)
