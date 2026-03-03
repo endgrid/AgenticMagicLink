@@ -63,6 +63,8 @@ def test_build_message_response_walks_stage_to_script_payload():
     )
 
     assert duration_response.magic_link_script is not None
+    assert duration_response.magic_link_script.checksum_sha256
+    assert duration_response.magic_link_script.version
     assert "Run instructions:" in duration_response.messages[-1].content
 
 
@@ -107,6 +109,39 @@ def test_build_message_response_sets_next_expected_input_stage():
     assert '12-digit AWS account ID' in response.messages[-1].content
 
 
+def test_plain_language_work_description_moves_to_account_id_stage():
+    store = InMemorySessionStore()
+    session_id = create_session_response(store).session_id
+
+    response = build_message_response(
+        MessageRequest(
+            session_id=session_id,
+            message='Contractor needs read access to S3 reports and CloudWatch logs',
+        ),
+        store,
+    )
+
+    assert response.next_expected_input == 'account_id'
+    assert '12-digit AWS account ID' in response.messages[-1].content
+
+
+def test_account_message_captures_account_and_moves_to_role_arn_stage():
+    store = InMemorySessionStore()
+    session_id = create_session_response(store).session_id
+    build_message_response(
+        MessageRequest(session_id=session_id, message='Need S3 and CloudWatch read-only access'),
+        store,
+    )
+
+    response = build_message_response(
+        MessageRequest(session_id=session_id, message='Use account 123456789012'),
+        store,
+    )
+
+    assert response.next_expected_input == 'role_arn'
+    assert 'Create the contractor role in AWS' in response.messages[-1].content
+
+
 
 
 def test_build_message_response_captures_role_arn_and_moves_to_duration_stage():
@@ -131,3 +166,56 @@ def test_build_message_response_captures_role_arn_and_moves_to_duration_stage():
 
     assert response.next_expected_input == "session_duration"
     assert "Allowed range is 900 to 43200 seconds" in response.messages[-1].content
+
+
+def test_invalid_role_arn_returns_validation_message():
+    store = InMemorySessionStore()
+    session_id = create_session_response(store).session_id
+    build_message_response(
+        MessageRequest(session_id=session_id, message='Need S3 and CloudWatch read-only access'),
+        store,
+    )
+    build_message_response(
+        MessageRequest(session_id=session_id, message='Use account 123456789012'),
+        store,
+    )
+
+    response = build_message_response(
+        MessageRequest(
+            session_id=session_id,
+            message='role arn:aws:iam::123456789012:user/not-a-role',
+        ),
+        store,
+    )
+
+    assert response.next_expected_input == 'role_arn'
+    assert "couldn't validate" in response.messages[-1].content.lower()
+
+
+def test_out_of_range_duration_returns_validation_and_no_script():
+    store = InMemorySessionStore()
+    session_id = create_session_response(store).session_id
+    build_message_response(
+        MessageRequest(session_id=session_id, message='Need S3 and CloudWatch read-only access'),
+        store,
+    )
+    build_message_response(
+        MessageRequest(session_id=session_id, message='Use account 123456789012'),
+        store,
+    )
+    build_message_response(
+        MessageRequest(
+            session_id=session_id,
+            message='arn:aws:iam::123456789012:role/ContractorRole',
+        ),
+        store,
+    )
+
+    response = build_message_response(
+        MessageRequest(session_id=session_id, message='duration 500 seconds'),
+        store,
+    )
+
+    assert response.next_expected_input == 'session_duration'
+    assert response.magic_link_script is None
+    assert 'must be between 900 and 43200 seconds' in response.messages[-1].content

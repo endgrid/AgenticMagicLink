@@ -135,3 +135,61 @@ def test_duration_capture_generates_script_with_selected_default():
 
     assert updated.magic_link_script is not None
     assert "DEFAULT_DURATION_SECONDS = 1800" in updated.magic_link_script
+
+
+def test_plain_language_work_description_sets_required_functions():
+    store = InMemorySessionStore()
+    session = store.create_session()
+
+    updated = store.update_from_message(
+        session.session_id,
+        "Contractor needs read access to S3 reports and CloudWatch logs",
+    )
+
+    assert updated.required_functions == [
+        "Contractor needs read access to S3 reports and CloudWatch logs"
+    ]
+
+
+def test_use_account_message_captures_account_id():
+    store = InMemorySessionStore()
+    session = store.create_session()
+    store.update_from_message(session.session_id, "Contractor needs read access to S3 reports")
+
+    updated = store.update_from_message(session.session_id, "Use account 123456789012")
+
+    assert updated.target_account_id == "123456789012"
+
+
+def test_duration_capture_includes_script_checksum_and_version():
+    store = InMemorySessionStore()
+    session = store.create_session()
+    store.update_from_message(session.session_id, "Contractor needs read access to S3 reports")
+    store.update_from_message(session.session_id, "Use account 123456789012")
+    store.update_from_message(
+        session.session_id,
+        "arn:aws:iam::123456789012:role/ContractorRole",
+    )
+
+    updated = store.update_from_message(session.session_id, "1800 seconds duration")
+
+    assert updated.magic_link_script is not None
+    assert updated.magic_link_script_checksum_sha256 is not None
+    assert updated.magic_link_script_version is not None
+
+
+def test_out_of_range_duration_shows_validation_and_skips_script_generation():
+    store = InMemorySessionStore()
+    session = store.create_session()
+    store.update_from_message(session.session_id, "Contractor needs read access to S3 reports")
+    store.update_from_message(session.session_id, "Use account 123456789012")
+    store.update_from_message(
+        session.session_id,
+        "arn:aws:iam::123456789012:role/ContractorRole",
+    )
+
+    updated = store.update_from_message(session.session_id, "duration 500 seconds")
+
+    assert updated.session_duration_seconds is None
+    assert updated.magic_link_script is None
+    assert "must be between 900 and 43200 seconds" in (updated.workflow_message or "")

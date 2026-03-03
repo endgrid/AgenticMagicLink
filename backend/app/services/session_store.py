@@ -79,8 +79,12 @@ class InMemorySessionStore:
             session.required_functions = [
                 item.strip() for item in user_message.split(",") if item.strip()
             ]
+        elif not session.required_functions and user_message.strip():
+            # Accept plain-language work descriptions even without the
+            # `required_functions` keyword so the workflow can continue.
+            session.required_functions = [user_message.strip()]
 
-        if "target account" in lowered_message or "account id" in lowered_message:
+        if "target account" in lowered_message or "account id" in lowered_message or "account" in lowered_message:
             maybe_account_id = self._extract_account_id(user_message)
             if maybe_account_id:
                 session.target_account_id = maybe_account_id
@@ -142,7 +146,8 @@ class InMemorySessionStore:
         return None
 
     def _extract_duration_seconds(self, user_message: str) -> int | None:
-        if "duration" not in user_message.lower():
+        lowered_message = user_message.lower()
+        if "duration" not in lowered_message and "second" not in lowered_message:
             return None
 
         match = re.search(r"\b(\d{3,5})\b", user_message)
