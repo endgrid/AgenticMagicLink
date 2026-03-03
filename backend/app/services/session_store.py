@@ -7,6 +7,9 @@ import os
 import re
 import time
 import uuid
+from dataclasses import asdict
+from decimal import Decimal
+from typing import Protocol
 
 import boto3
 
@@ -43,6 +46,14 @@ class PolicyFailureDLQ:
 
         sqs_client = self._sqs_client or boto3.client("sqs")
         sqs_client.send_message(QueueUrl=self.queue_url, MessageBody=json.dumps(payload))
+
+
+class SessionStore(Protocol):
+    def create_session(self) -> SessionState: ...
+
+    def get_session(self, session_id: str) -> SessionState | None: ...
+
+    def update_from_message(self, session_id: str, user_message: str) -> SessionState: ...
 
 
 class InMemorySessionStore:
@@ -108,6 +119,9 @@ class InMemorySessionStore:
                 session.workflow_message = (
                     "Create the contractor role in AWS, then send me the role ARN."
                 )
+
+        if maybe_account_id and not session.target_account_id:
+            session.target_account_id = maybe_account_id
 
         if maybe_role_arn:
             session.role_arn = maybe_role_arn
@@ -344,3 +358,51 @@ class InMemorySessionStore:
             "1) Save the generated script to a local file.\n"
             "2) Execute with python and provide region/session options as needed."
         )
+
+
+class DynamoDBSessionStore(InMemorySessionStore):
+    def __init__(
+        self,
+        table_name: str,
+        *,
+        bedrock_client: BedrockClient | None = None,
+        failure_dlq: PolicyFailureDLQ | None = None,
+        dynamodb_resource: object | None = None,
+    ) -> None:
+        super().__init__(bedrock_client=bedrock_client, failure_dlq=failure_dlq)
+        resource = dynamodb_resource or boto3.resource("dynamodb")
+        self._table = resource.Table(table_name)
+
+    def create_session(self) -> SessionState:
+        session = SessionState(
+            session_id=str(uuid.uuid4()),
+            conversation_stage="awaiting_work_description",
+        )
+        self._table.put_item(Item=self._serialize_session(session))
+        return session
+
+    def get_session(self, session_id: str) -> SessionState | None:
+        response = self._table.get_item(Key={"session_id": session_id})
+        item = response.get("Item")
+        if not item:
+            return None
+        return self._deserialize_session(item)
+
+    def update_from_message(self, session_id: str, user_message: str) -> SessionState:
+        session = self.get_session(session_id)
+        if session is None:
+            raise KeyError(session_id)
+
+        self._sessions[session_id] = session
+        updated = super().update_from_message(session_id, user_message)
+        self._table.put_item(Item=self._serialize_session(updated))
+        return updated
+
+    def _serialize_session(self, session: SessionState) -> dict[str, object]:
+        return asdict(session)
+
+    def _deserialize_session(self, item: dict[str, object]) -> SessionState:
+        if isinstance(item.get("session_duration_seconds"), Decimal):
+            item = dict(item)
+            item["session_duration_seconds"] = int(item["session_duration_seconds"])
+        return SessionState(**item)
