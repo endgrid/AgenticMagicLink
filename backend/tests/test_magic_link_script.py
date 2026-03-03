@@ -45,22 +45,23 @@ class MagicLinkScriptIntegrationTest(unittest.TestCase):
 
         with mock.patch("sys.argv", [
             "magic_link.py",
+            "arn:aws:iam::123456789012:role/Test",
             "--region", "us-east-1",
-            "--destination", "https://console.aws.amazon.com/s3/home",
         ]), mock.patch("urllib.request.urlopen", side_effect=fake_urlopen), mock.patch(
             "sys.stdout", new_callable=io.StringIO
         ) as stdout:
             rc = namespace["main"]()
 
         self.assertEqual(rc, 0)
-        output = stdout.getvalue().strip()
+        lines = [line for line in stdout.getvalue().strip().splitlines() if line.strip()]
+        output = lines[-3]
         parsed_login = urllib.parse.urlparse(output)
         login_qs = urllib.parse.parse_qs(parsed_login.query)
 
         self.assertEqual(parsed_login.netloc, "signin.aws.amazon.com")
         self.assertEqual(login_qs["Action"], ["login"])
         self.assertEqual(login_qs["SigninToken"], ["TOKEN123"])
-        self.assertEqual(login_qs["Destination"], ["https://console.aws.amazon.com/s3/home"])
+        self.assertEqual(login_qs["Destination"], ["https://us-east-1.console.aws.amazon.com/"])
 
     def test_generated_script_rejects_account_mismatch(self) -> None:
         script = generate_magic_link_script(

@@ -21,6 +21,7 @@ def _determine_next_expected_input(
     required_functions: list[str],
     target_account_id: str | None,
     role_arn: str | None,
+    session_duration_seconds: int | None,
 ) -> str | None:
     if not required_functions:
         return "work_description"
@@ -28,6 +29,8 @@ def _determine_next_expected_input(
         return "account_id"
     if not role_arn:
         return "role_arn"
+    if not session_duration_seconds:
+        return "session_duration"
     return None
 
 
@@ -35,6 +38,7 @@ def _build_assistant_prompt(
     required_functions: list[str],
     target_account_id: str | None,
     role_arn: str | None,
+    session_duration_seconds: int | None,
     generated_policy_json: str | None,
     magic_link_script: str | None,
     workflow_message: str | None,
@@ -49,6 +53,10 @@ def _build_assistant_prompt(
         "role_arn": (
             "Thanks. Now provide the IAM role ARN to assume "
             "(example: arn:aws:iam::123456789012:role/MyRole)."
+        ),
+        "session_duration": (
+            "Great. Choose a session duration in seconds for the contractor session. "
+            "Allowed range is 900 to 43200 seconds."
         ),
         None: (
             "All required inputs are captured. You can ask for policy/script generation "
@@ -65,6 +73,7 @@ def _build_assistant_prompt(
         f"- required_functions: {required_functions or 'unset'}\n"
         f"- target_account_id: {target_account_id or 'unset'}\n"
         f"- role_arn: {role_arn or 'unset'}\n"
+        f"- session_duration_seconds: {session_duration_seconds or 'unset'}\n"
         f"- generated_policy_json: {'set' if generated_policy_json else 'unset'}\n"
         f"- magic_link_script: {'set' if magic_link_script else 'unset'}\n\n"
         f"{assistant_guidance}"
@@ -81,12 +90,14 @@ def build_message_response(payload: MessageRequest, store: InMemorySessionStore)
         updated_session.required_functions,
         updated_session.target_account_id,
         updated_session.role_arn,
+        updated_session.session_duration_seconds,
     )
 
     assistant_text = _build_assistant_prompt(
         updated_session.required_functions,
         updated_session.target_account_id,
         updated_session.role_arn,
+        updated_session.session_duration_seconds,
         updated_session.generated_policy_json,
         updated_session.magic_link_script,
         updated_session.workflow_message,

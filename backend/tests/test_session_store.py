@@ -105,7 +105,9 @@ def test_invalid_role_arn_sets_validation_error():
     assert "couldn't validate" in (updated.workflow_message or "").lower()
 
 
-def test_valid_role_arn_generates_script():
+
+
+def test_valid_role_arn_prompts_for_session_duration_before_script_generation():
     store = InMemorySessionStore()
     session = store.create_session()
     store.update_from_message(session.session_id, "target account 123456789012")
@@ -116,5 +118,20 @@ def test_valid_role_arn_generates_script():
     )
 
     assert updated.target_role_arn == "arn:aws:iam::123456789012:role/ContractorRole"
+    assert updated.magic_link_script is None
+    assert "between 900 and 43200" in (updated.workflow_message or "")
+
+
+def test_duration_capture_generates_script_with_selected_default():
+    store = InMemorySessionStore()
+    session = store.create_session()
+    store.update_from_message(session.session_id, "target account 123456789012")
+    store.update_from_message(
+        session.session_id,
+        "Here is role arn:aws:iam::123456789012:role/ContractorRole",
+    )
+
+    updated = store.update_from_message(session.session_id, "set duration to 1800 seconds")
+
     assert updated.magic_link_script is not None
-    assert "DEFAULT_ROLE_ARN = \"arn:aws:iam::123456789012:role/ContractorRole\"" in updated.magic_link_script
+    assert "DEFAULT_DURATION_SECONDS = 1800" in updated.magic_link_script

@@ -35,6 +35,10 @@ def test_build_message_response_walks_stage_to_script_payload():
     store = InMemorySessionStore()
     session_id = create_session_response(store).session_id
 
+    build_message_response(
+        MessageRequest(session_id=session_id, message="required_functions, listBuckets"),
+        store,
+    )
     account_payload = MessageRequest(session_id=session_id, message="Target account is 123456789012")
     account_response = build_message_response(account_payload, store)
     assert "Create the contractor role in AWS" in account_response.messages[-1].content
@@ -46,9 +50,20 @@ def test_build_message_response_walks_stage_to_script_payload():
         history=account_response.messages,
     )
     role_response = build_message_response(role_payload, store)
+    assert role_response.magic_link_script is None
+    assert role_response.next_expected_input == "session_duration"
 
-    assert role_response.magic_link_script is not None
-    assert "Run instructions:" in role_response.messages[-1].content
+    duration_response = build_message_response(
+        MessageRequest(
+            session_id=session_id,
+            message="Set duration to 1800 seconds",
+            history=role_response.messages,
+        ),
+        store,
+    )
+
+    assert duration_response.magic_link_script is not None
+    assert "Run instructions:" in duration_response.messages[-1].content
 
 
 def test_build_message_response_raises_for_missing_session():
@@ -92,7 +107,9 @@ def test_build_message_response_sets_next_expected_input_stage():
     assert '12-digit AWS account ID' in response.messages[-1].content
 
 
-def test_build_message_response_captures_role_arn_and_completes_stage():
+
+
+def test_build_message_response_captures_role_arn_and_moves_to_duration_stage():
     store = InMemorySessionStore()
     session_id = create_session_response(store).session_id
 
@@ -112,5 +129,5 @@ def test_build_message_response_captures_role_arn_and_completes_stage():
         store,
     )
 
-    assert response.next_expected_input is None
-    assert 'All required inputs are captured' in response.messages[-1].content
+    assert response.next_expected_input == "session_duration"
+    assert "Allowed range is 900 to 43200 seconds" in response.messages[-1].content

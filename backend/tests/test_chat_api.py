@@ -11,10 +11,11 @@ class SessionStoreMagicLinkPayloadTest(unittest.TestCase):
         session = store.create_session()
 
         store.update_from_message(session.session_id, "Target account 123456789012")
-        updated = store.update_from_message(
+        store.update_from_message(
             session.session_id,
             "Please use arn:aws:iam::123456789012:role/ContractorRole",
         )
+        updated = store.update_from_message(session.session_id, "duration 1800")
 
         expected_checksum = hashlib.sha256(updated.magic_link_script.encode("utf-8")).hexdigest()
 
