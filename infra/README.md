@@ -1,6 +1,19 @@
 # Infrastructure
 
-This folder includes a CloudFormation template and deployment script for shipping the React frontend to a private S3 origin fronted by CloudFront.
+This folder defines the currently scoped infrastructure for static frontend hosting and deployment.
+
+## AWS services used (auditable scope)
+
+This infra package does **not** provision "all AWS services." It only provisions or references the services listed below.
+
+| Service | Required/Optional | Runtime purpose | Where configured |
+| --- | --- | --- | --- |
+| Amazon S3 | Required | Store built frontend assets as a private static origin. | `infra/cloudformation/frontend-static-site.yaml`, `infra/scripts/deploy_frontend.sh`. |
+| Amazon CloudFront | Required | Serve frontend assets globally and provide SPA routing fallback behavior. | `infra/cloudformation/frontend-static-site.yaml`, `infra/scripts/deploy_frontend.sh`. |
+| AWS CloudFormation | Required (for this deployment path) | Provision S3 + CloudFront hosting resources from template. | `infra/cloudformation/frontend-static-site.yaml` and deployment commands in this README. |
+| Amazon API Gateway | Optional/external dependency | Acts as the backend API URL injected into the frontend build (`API_BASE_URL`), but is not provisioned in this folder. | Referenced by `API_BASE_URL` in `infra/scripts/deploy_frontend.sh`. |
+| Amazon Cognito | Optional (future) | Not used in current baseline; listed as a future extension for authenticated APIs. | Described only in the "Identity and authorization" section of this README. |
+| Amazon DynamoDB | Optional (future) | Not used by this frontend hosting stack; placeholder session table template exists for future backend persistence. | `infra/dynamodb-sessions.yaml`. |
 
 ## Frontend static hosting resources
 
@@ -57,6 +70,12 @@ bash infra/scripts/deploy_frontend.sh
 The frontend reads `VITE_API_BASE_URL` at build time in `frontend/src/api.ts`.
 
 If unset, it defaults to `http://localhost:8000` for local development.
+
+### Frontend dependency contract
+
+- Browser code calls only the backend API URL (`VITE_API_BASE_URL`).
+- Browser code does not call AWS services directly and does not include AWS SDK/Cognito auth integration in this baseline.
+- AWS integrations are expected to remain server-side (backend/API layer).
 
 ## Identity and authorization
 
