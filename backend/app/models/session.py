@@ -11,3 +11,5 @@ class SessionState:
     target_account_id: str | None = None
     generated_policy_json: str | None = None
     magic_link_script: str | None = None
+    version: int = 0
+    expires_at: int | None = None
