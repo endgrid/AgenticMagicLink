@@ -1,6 +1,6 @@
 # Agentic Magic Link Monorepo
 
-This repository now uses a monorepo layout with a React chat frontend and a FastAPI backend that manages an in-memory agent workflow session.
+This repository uses a monorepo layout with a React chat frontend and a FastAPI backend that manages an in-memory agent workflow session.
 
 ## Repository layout
 
@@ -19,6 +19,24 @@ This repository now uses a monorepo layout with a React chat frontend and a Fast
    - `generated_policy_json` (generated via Amazon Bedrock when policy generation is requested)
    - `magic_link_script`
 5. The backend responds with full message history including assistant summary.
+
+### Frontend/backend dependency contract
+
+- The browser frontend talks **only** to the backend API endpoint configured by `VITE_API_BASE_URL`.
+- The frontend does **not** use AWS SDK clients directly and does **not** perform Cognito/AWS auth flows in the browser.
+- All AWS service access (Bedrock, optional SSM/Secrets Manager reads, optional SQS DLQ writes) happens server-side in the backend.
+
+### AWS services used (auditable scope)
+
+This application does **not** use "all AWS services." It currently uses only the services listed below.
+
+| Service | Required/Optional | Runtime purpose | Where configured |
+| --- | --- | --- | --- |
+| Amazon Bedrock Runtime | Optional | Generate IAM policy JSON from function metadata when policy generation is requested. | Backend env (`BEDROCK_MODEL_ID`, `BEDROCK_MODEL_ID_PARAMETER`, or `BEDROCK_MODEL_ID_SECRET_ID`) and backend code (`backend/src/bedrock_client.py`). |
+| AWS Systems Manager Parameter Store | Optional | Resolve Bedrock model ID at runtime when `BEDROCK_MODEL_ID_PARAMETER` is set. | Backend env (`BEDROCK_MODEL_ID_PARAMETER`) and backend code (`backend/src/bedrock_client.py`). |
+| AWS Secrets Manager | Optional | Resolve Bedrock model ID at runtime when `BEDROCK_MODEL_ID_SECRET_ID` is set. | Backend env (`BEDROCK_MODEL_ID_SECRET_ID`, optional `BEDROCK_MODEL_ID_SECRET_KEY`) and backend code (`backend/src/bedrock_client.py`). |
+| Amazon SQS | Optional | Receive failed synchronous policy-generation events when a DLQ URL is configured. | Backend env (`POLICY_GENERATION_DLQ_URL`) and backend code (`backend/app/services/session_store.py`). |
+| Amazon DynamoDB | Optional (future) | Not used at runtime in the current implementation; session state is in-memory only. Reserved for a future persistent session store. | Placeholder template only: `infra/dynamodb-sessions.yaml`. |
 
 ## Local setup
 
