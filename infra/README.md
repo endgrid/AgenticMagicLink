@@ -2,39 +2,29 @@
 
 Terraform configuration for deploying the backend chat API on AWS Lambda + API Gateway HTTP API.
 
-## What this defines
+- Frontend static hosting.
+- Backend API service.
+- Session store replacement (Redis/DynamoDB) when moving beyond in-memory state.
 
-- Two Lambda functions for existing chat routes:
-  - `POST /api/chat/session`
-  - `POST /api/chat/message`
-- IAM execution role with CloudWatch Logs permissions.
-- API Gateway HTTP API routes/integrations/stage.
-- Lambda environment variable wiring, including `BEDROCK_MODEL_ID`.
-- Permissive CORS equivalent to FastAPI middleware in `backend/app/main.py`:
-  - `allow_origins = ["*"]`
-  - `allow_methods = ["*"]`
-  - `allow_headers = ["*"]`
-  - `allow_credentials = true`
+## DynamoDB session table
 
-## Files
+`dynamodb-sessions.yaml` provisions a DynamoDB table keyed by `session_id`.
 
-- `terraform/main.tf`
-- `terraform/variables.tf`
-- `terraform/outputs.tf`
+- **TTL attribute:** `expires_at`
+- **Optimistic locking attribute:** `version` (enforced by conditional `UpdateItem` in the backend)
 
-## Deploy quick start
-
-1. Build and zip backend code so the package contains the `backend/` package.
-2. Initialize Terraform:
+### Deploy
 
 ```bash
-cd infra/terraform
-terraform init
+aws cloudformation deploy \
+  --template-file infra/dynamodb-sessions.yaml \
+  --stack-name agentic-magic-link-sessions \
+  --capabilities CAPABILITY_NAMED_IAM
 ```
 
-3. Plan/apply:
+### Backend configuration
 
-```bash
-terraform plan -var="lambda_package_path=../../backend.zip" -var="bedrock_model_id=<model-id>"
-terraform apply -var="lambda_package_path=../../backend.zip" -var="bedrock_model_id=<model-id>"
-```
+Set these environment variables for the API service:
+
+- `SESSION_TABLE_NAME` (default: `agentic-magic-link-sessions`)
+- `SESSION_TTL_SECONDS` (default: `3600`)
