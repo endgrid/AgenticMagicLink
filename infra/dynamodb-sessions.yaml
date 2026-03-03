@@ -1,0 +1,32 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: DynamoDB table for AgenticMagicLink session state.
+
+Parameters:
+  SessionTableName:
+    Type: String
+    Default: agentic-magic-link-sessions
+    Description: Name of the DynamoDB table that stores session state.
+
+Resources:
+  SessionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref SessionTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+Outputs:
+  SessionTableName:
+    Value: !Ref SessionTable
+    Description: Session table name.
+  SessionTableArn:
+    Value: !GetAtt SessionTable.Arn
+    Description: Session table ARN.
