@@ -1,6 +1,16 @@
 import type { ChatMessage, MessageResponse, SessionResponse } from './types';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+function getApiBaseUrl(): string {
+  const configuredUrl = import.meta.env.VITE_API_BASE_URL;
+
+  if (!configuredUrl || configuredUrl.trim().length === 0) {
+    return 'http://localhost:8000';
+  }
+
+  return configuredUrl.replace(/\/+$/, '');
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 export async function createSession(): Promise<SessionResponse> {
   const response = await fetch(`${API_BASE_URL}/api/chat/session`, {

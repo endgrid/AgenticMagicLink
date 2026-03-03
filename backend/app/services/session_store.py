@@ -31,9 +31,8 @@ class PolicyFailureDLQ:
         sqs_client = self._sqs_client or boto3.client("sqs")
         sqs_client.send_message(QueueUrl=self.queue_url, MessageBody=json.dumps(payload))
 
+from ..models.session import SessionState
 
-class InMemorySessionStore:
-    """Simple in-memory session store; can be replaced with Redis/DB later."""
 
     def __init__(
         self,
@@ -47,14 +46,17 @@ class InMemorySessionStore:
 
     def create_session(self) -> SessionState:
         session = SessionState(session_id=str(uuid.uuid4()))
-        self._sessions[session.session_id] = session
-        return session
+        return self._repository.create_session(session)
 
     def get_session(self, session_id: str) -> SessionState | None:
-        return self._sessions.get(session_id)
+        return self._repository.get_session(session_id)
 
     def update_from_message(self, session_id: str, user_message: str) -> SessionState:
-        session = self._sessions[session_id]
+        session = self._repository.get_session(session_id)
+        if session is None:
+            raise KeyError(session_id)
+
+        original_version = session.version
 
         if "required_functions" in user_message.lower():
             session.required_functions = [
