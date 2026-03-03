@@ -10,13 +10,12 @@ from app.models.chat import (
 from app.services.session_store import InMemorySessionStore
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
-store = InMemorySessionStore()
+store = SessionService.from_env()
 
 
 @router.post("/session", response_model=SessionResponse)
 def create_session() -> SessionResponse:
-    session = store.create_session()
-    return SessionResponse(session_id=session.session_id)
+    return create_session_response(store)
 
 
 @router.post("/message", response_model=MessageResponse)
@@ -25,7 +24,10 @@ def chat_message(payload: MessageRequest) -> MessageResponse:
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    updated_session = store.update_from_message(payload.session_id, payload.message)
+    try:
+        updated_session = store.update_from_message(payload.session_id, payload.message)
+    except ConcurrencyError as exc:
+        raise HTTPException(status_code=409, detail="Session update conflict, retry request") from exc
 
     assistant_text = (
         "Captured workflow state:\n"

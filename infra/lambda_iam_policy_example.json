@@ -1,0 +1,38 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeOnlyApprovedBedrockModels",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": [
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0",
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-7-sonnet-20250219-v1:0"
+      ]
+    },
+    {
+      "Sid": "ReadBedrockModelConfigFromParameterStore",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter"
+      ],
+      "Resource": "arn:aws:ssm:us-east-1:123456789012:parameter/agentic-magic-link/bedrock/model-id"
+    },
+    {
+      "Sid": "ReadBedrockModelConfigFromSecretsManager",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": "arn:aws:secretsmanager:us-east-1:123456789012:secret:agentic-magic-link/bedrock/model-*"
+    },
+    {
+      "Sid": "SendPolicyFailuresToDLQ",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage"
+      ],
+      "Resource": "arn:aws:sqs:us-east-1:123456789012:agentic-magic-link-policy-failures"
+    }
+  ]
+}
