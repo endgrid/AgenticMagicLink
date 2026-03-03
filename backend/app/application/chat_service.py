@@ -12,11 +12,9 @@ class SessionNotFoundError(Exception):
     """Raised when message handling is attempted for an unknown session."""
 
 
-
 def create_session_response(store: InMemorySessionStore) -> SessionResponse:
     session = store.create_session()
     return SessionResponse(session_id=session.session_id)
-
 
 
 def build_message_response(payload: MessageRequest, store: InMemorySessionStore) -> MessageResponse:

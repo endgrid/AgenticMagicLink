@@ -9,7 +9,6 @@ import uuid
 
 import boto3
 
-from app.models.session import SessionState
 from src.bedrock_client import (
     BedrockClient,
     BedrockConfigurationError,
@@ -18,12 +17,14 @@ from src.bedrock_client import (
 )
 from src.magic_link_script import MAGIC_LINK_SCRIPT_VERSION, generate_magic_link_script
 
+from ..models.session import SessionState
+
 logger = logging.getLogger(__name__)
 
 
 class PolicyFailureDLQ:
     def __init__(self, queue_url: str | None = None, sqs_client: object | None = None) -> None:
-        self.queue_url = queue_url or os.getenv("POLICY_FAILURE_DLQ_URL")
+        self.queue_url = queue_url if queue_url is not None else os.getenv("POLICY_FAILURE_DLQ_URL")
         self._sqs_client = sqs_client
 
     def enqueue(self, payload: dict[str, object]) -> None:
@@ -54,7 +55,7 @@ class InMemorySessionStore:
         return self._sessions.get(session_id)
 
     def update_from_message(self, session_id: str, user_message: str) -> SessionState:
-        session = self.get_session(session_id)
+        session = self._sessions.get(session_id)
         if session is None:
             raise KeyError(session_id)
 
