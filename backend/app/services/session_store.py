@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Dict
 
-from app.models.session import SessionState
+from backend.app.models.session import SessionState
 
 
 class InMemorySessionStore:
