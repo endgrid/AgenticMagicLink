@@ -24,15 +24,29 @@ def build_message_response(payload: MessageRequest, store: InMemorySessionStore)
 
     updated_session = store.update_from_message(payload.session_id, payload.message)
 
-    assistant_text = updated_session.latest_assistant_prompt or (
-        "Captured workflow state:\n"
-        f"- conversation_stage: {updated_session.conversation_stage}\n"
-        f"- required_functions: {updated_session.required_functions or '[]'}\n"
-        f"- target_account_id: {updated_session.target_account_id or 'unset'}\n"
-        f"- role_name: {updated_session.role_name or 'unset'}\n"
-        f"- generated_policy_json: {'set' if updated_session.generated_policy_json else 'unset'}\n"
-        f"- magic_link_script: {'set' if updated_session.magic_link_script else 'unset'}"
-    )
+    assistant_lines = [
+        "Captured workflow state:",
+        f"- required_functions: {updated_session.required_functions or '[]'}",
+        f"- target_account_id: {updated_session.target_account_id or 'unset'}",
+        f"- target_role_arn: {updated_session.target_role_arn or 'unset'}",
+        f"- generated_policy_json: {'set' if updated_session.generated_policy_json else 'unset'}",
+        f"- magic_link_script: {'set' if updated_session.magic_link_script else 'unset'}",
+    ]
+
+    if updated_session.workflow_message:
+        assistant_lines.append(f"\nNext step: {updated_session.workflow_message}")
+
+    if updated_session.magic_link_script:
+        assistant_lines.extend(
+            [
+                "\nRun instructions:",
+                "1) Save the payload script to a local file, e.g. magic_link.py.",
+                "2) Run `python magic_link.py --region us-east-1` (optionally override --session-name/--destination).",
+                "3) Open the printed URL in a browser to access the AWS console.",
+            ]
+        )
+
+    assistant_text = "\n".join(assistant_lines)
 
     messages = [
         *payload.history,
