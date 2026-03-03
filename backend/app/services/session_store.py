@@ -18,6 +18,8 @@ from src.bedrock_client import (
 )
 from src.magic_link_script import (
     MAGIC_LINK_SCRIPT_VERSION,
+    MAX_SESSION_DURATION_SECONDS,
+    MIN_SESSION_DURATION_SECONDS,
     MagicLinkScriptConfig,
     generate_magic_link_script,
 )
@@ -89,11 +91,25 @@ class InMemorySessionStore:
         maybe_role_arn = self._extract_role_arn(user_message)
         if maybe_role_arn:
             session.role_arn = maybe_role_arn
+            session.workflow_message = (
+                "Got it. Now choose a session duration in seconds "
+                f"between {MIN_SESSION_DURATION_SECONDS} and {MAX_SESSION_DURATION_SECONDS}."
+            )
         elif "role" in lowered_message and "arn" in lowered_message:
             session.workflow_message = (
                 "I couldn't validate that role ARN. Please send a full IAM role ARN, "
                 "for example arn:aws:iam::123456789012:role/ContractorRole."
             )
+
+        maybe_duration_seconds = self._extract_duration_seconds(user_message)
+        if maybe_duration_seconds is not None:
+            if MIN_SESSION_DURATION_SECONDS <= maybe_duration_seconds <= MAX_SESSION_DURATION_SECONDS:
+                session.session_duration_seconds = maybe_duration_seconds
+            else:
+                session.workflow_message = (
+                    "Session duration must be between "
+                    f"{MIN_SESSION_DURATION_SECONDS} and {MAX_SESSION_DURATION_SECONDS} seconds."
+                )
 
         if "policy" in lowered_message:
             policy = self._generate_policy(session, user_message)
@@ -102,6 +118,7 @@ class InMemorySessionStore:
         if (
             session.target_account_id
             and session.role_arn
+            and session.session_duration_seconds
             and (
                 "script" in lowered_message
                 or "magic link" in lowered_message
@@ -123,6 +140,15 @@ class InMemorySessionStore:
         if match:
             return match.group(0)
         return None
+
+    def _extract_duration_seconds(self, user_message: str) -> int | None:
+        if "duration" not in user_message.lower():
+            return None
+
+        match = re.search(r"\b(\d{3,5})\b", user_message)
+        if not match:
+            return None
+        return int(match.group(1))
 
     def _emit_metric(self, metric_name: str, value: int, outcome: str) -> None:
         metric_log = {
@@ -265,6 +291,10 @@ class InMemorySessionStore:
     def _build_magic_link_script(self, session: SessionState) -> None:
         config = MagicLinkScriptConfig(
             default_role_arn=session.role_arn or MagicLinkScriptConfig().default_role_arn,
+            default_session_duration_seconds=(
+                session.session_duration_seconds
+                or MagicLinkScriptConfig().default_session_duration_seconds
+            ),
             expected_account_id=session.target_account_id,
         )
         script = generate_magic_link_script(config)

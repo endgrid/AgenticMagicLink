@@ -12,6 +12,7 @@ class SessionState:
     required_services: list[str] = field(default_factory=list)
     target_account_id: str | None = None
     role_arn: str | None = None
+    session_duration_seconds: int | None = None
     generated_policy_json: str | None = None
     next_assistant_prompt: str | None = None
     magic_link_script: str | None = None
