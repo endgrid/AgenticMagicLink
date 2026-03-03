@@ -24,10 +24,12 @@ def build_message_response(payload: MessageRequest, store: InMemorySessionStore)
 
     updated_session = store.update_from_message(payload.session_id, payload.message)
 
-    assistant_text = (
+    assistant_text = updated_session.latest_assistant_prompt or (
         "Captured workflow state:\n"
+        f"- conversation_stage: {updated_session.conversation_stage}\n"
         f"- required_functions: {updated_session.required_functions or '[]'}\n"
         f"- target_account_id: {updated_session.target_account_id or 'unset'}\n"
+        f"- role_name: {updated_session.role_name or 'unset'}\n"
         f"- generated_policy_json: {'set' if updated_session.generated_policy_json else 'unset'}\n"
         f"- magic_link_script: {'set' if updated_session.magic_link_script else 'unset'}"
     )
