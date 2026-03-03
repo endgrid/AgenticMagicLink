@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 import os
 import re
 import time
@@ -17,7 +16,11 @@ from src.bedrock_client import (
     BedrockInvocationError,
     BedrockOutputError,
 )
-from src.magic_link_script import MAGIC_LINK_SCRIPT_VERSION, MagicLinkScriptConfig, generate_magic_link_script
+from src.magic_link_script import (
+    MAGIC_LINK_SCRIPT_VERSION,
+    MagicLinkScriptConfig,
+    generate_magic_link_script,
+)
 
 from ..models.session import SessionState
 
@@ -68,33 +71,42 @@ class InMemorySessionStore:
             raise KeyError(session_id)
 
         session.workflow_message = None
+        lowered_message = user_message.lower()
 
-        if "required_functions" in user_message.lower():
+        if "required_functions" in lowered_message:
             session.required_functions = [
                 item.strip() for item in user_message.split(",") if item.strip()
             ]
 
-        if "target account" in user_message.lower() or "account id" in user_message.lower():
+        if "target account" in lowered_message or "account id" in lowered_message:
             maybe_account_id = self._extract_account_id(user_message)
             if maybe_account_id:
                 session.target_account_id = maybe_account_id
+                session.workflow_message = (
+                    "Create the contractor role in AWS, then send me the role ARN."
+                )
 
         maybe_role_arn = self._extract_role_arn(user_message)
         if maybe_role_arn:
             session.role_arn = maybe_role_arn
+        elif "role" in lowered_message and "arn" in lowered_message:
+            session.workflow_message = (
+                "I couldn't validate that role ARN. Please send a full IAM role ARN, "
+                "for example arn:aws:iam::123456789012:role/ContractorRole."
+            )
 
-        if "policy" in user_message.lower():
+        if "policy" in lowered_message:
             policy = self._generate_policy(session, user_message)
             session.generated_policy_json = json.dumps(policy) if policy else None
 
-            if "policy" in lowered_message:
-                policy = self._generate_policy(session, user_message)
-                session.generated_policy_json = json.dumps(policy) if policy else None
-
         if (
             session.target_account_id
-            and session.target_role_arn
-            and ("script" in user_message.lower() or "magic link" in user_message.lower() or session.magic_link_script is None)
+            and session.role_arn
+            and (
+                "script" in lowered_message
+                or "magic link" in lowered_message
+                or session.magic_link_script is None
+            )
         ):
             self._build_magic_link_script(session)
 
@@ -249,3 +261,21 @@ class InMemorySessionStore:
                     }
                 )
             )
+
+    def _build_magic_link_script(self, session: SessionState) -> None:
+        config = MagicLinkScriptConfig(
+            default_role_arn=session.role_arn or MagicLinkScriptConfig().default_role_arn,
+            expected_account_id=session.target_account_id,
+        )
+        script = generate_magic_link_script(config)
+
+        session.magic_link_script = script
+        session.magic_link_script_checksum_sha256 = hashlib.sha256(
+            script.encode("utf-8")
+        ).hexdigest()
+        session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
+        session.workflow_message = (
+            "Run instructions:\n"
+            "1) Save the generated script to a local file.\n"
+            "2) Execute with python and provide region/session options as needed."
+        )
