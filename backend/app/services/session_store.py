@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import os
 import time
 import uuid
@@ -64,13 +65,14 @@ class InMemorySessionStore:
                 item.strip() for item in user_message.split(",") if item.strip()
             ]
 
-        if "target account" in user_message.lower():
-            tokens = user_message.split()
-            maybe_account_id = next(
-                (token for token in tokens if token.isdigit() and len(token) == 12), None
-            )
+        if "target account" in user_message.lower() or "account id" in user_message.lower():
+            maybe_account_id = self._extract_account_id(user_message)
             if maybe_account_id:
                 session.target_account_id = maybe_account_id
+
+        maybe_role_arn = self._extract_role_arn(user_message)
+        if maybe_role_arn:
+            session.role_arn = maybe_role_arn
 
         if "policy" in user_message.lower():
             policy = self._generate_policy(session, user_message)
@@ -85,6 +87,18 @@ class InMemorySessionStore:
             session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
 
         return session
+
+    def _extract_account_id(self, user_message: str) -> str | None:
+        match = re.search(r"\b(\d{12})\b", user_message)
+        if match:
+            return match.group(1)
+        return None
+
+    def _extract_role_arn(self, user_message: str) -> str | None:
+        match = re.search(r"\barn:aws:iam::\d{12}:role/[A-Za-z0-9+=,.@_\-/]+\b", user_message)
+        if match:
+            return match.group(0)
+        return None
 
     def _emit_metric(self, metric_name: str, value: int, outcome: str) -> None:
         metric_log = {

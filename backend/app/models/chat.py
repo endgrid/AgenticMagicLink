@@ -28,3 +28,4 @@ class MessageResponse(BaseModel):
     session_id: str
     messages: list[ChatMessage]
     magic_link_script: MagicLinkScriptPayload | None = None
+    next_expected_input: Literal["work_description", "account_id", "role_arn"] | None = None

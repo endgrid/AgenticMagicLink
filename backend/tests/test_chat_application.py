@@ -57,3 +57,40 @@ def test_lambda_post_message_returns_404_for_missing_session():
 
     assert response["statusCode"] == 404
     assert json.loads(response["body"]) == {"detail": "Session not found"}
+
+
+def test_build_message_response_sets_next_expected_input_stage():
+    store = InMemorySessionStore()
+    session_id = create_session_response(store).session_id
+
+    response = build_message_response(
+        MessageRequest(session_id=session_id, message='Need required_functions, listBuckets, getObject'),
+        store,
+    )
+
+    assert response.next_expected_input == 'account_id'
+    assert '12-digit AWS account ID' in response.messages[-1].content
+
+
+def test_build_message_response_captures_role_arn_and_completes_stage():
+    store = InMemorySessionStore()
+    session_id = create_session_response(store).session_id
+
+    build_message_response(
+        MessageRequest(session_id=session_id, message='required_functions, listBuckets'),
+        store,
+    )
+    build_message_response(
+        MessageRequest(session_id=session_id, message='target account 123456789012'),
+        store,
+    )
+    response = build_message_response(
+        MessageRequest(
+            session_id=session_id,
+            message='use arn:aws:iam::123456789012:role/AgenticMagicLinkRole',
+        ),
+        store,
+    )
+
+    assert response.next_expected_input is None
+    assert 'All required inputs are captured' in response.messages[-1].content

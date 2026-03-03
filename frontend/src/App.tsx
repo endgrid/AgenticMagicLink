@@ -1,10 +1,32 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { createSession, sendMessage } from './api';
-import type { ChatMessage } from './types';
+import type { ChatMessage, MagicLinkScriptPayload, NextExpectedInput } from './types';
+
+const NEXT_INPUT_HELPER: Record<NextExpectedInput, string> = {
+  work_description: 'Expected input: describe the IAM work you need done.',
+  account_id: 'Expected input: provide the 12-digit AWS account ID.',
+  role_arn: 'Expected input: provide the IAM role ARN to assume.',
+};
+
+function inferExpectedInputFromAssistant(messages: ChatMessage[]): NextExpectedInput | null {
+  const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+  if (!lastAssistant) return null;
+
+  const assistantText = lastAssistant.content.toLowerCase();
+  if (assistantText.includes('account id')) return 'account_id';
+  if (assistantText.includes('role arn')) return 'role_arn';
+  if (assistantText.includes('describe the iam workflow') || assistantText.includes('required_functions')) {
+    return 'work_description';
+  }
+
+  return null;
+}
 
 function App() {
   const [sessionId, setSessionId] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [magicLinkScript, setMagicLinkScript] = useState<MagicLinkScriptPayload | null>(null);
+  const [nextExpectedInput, setNextExpectedInput] = useState<NextExpectedInput | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +57,8 @@ function App() {
     try {
       const response = await sendMessage(sessionId, userMessage.content, messages);
       setMessages(response.messages);
+      setMagicLinkScript(response.magic_link_script ?? null);
+      setNextExpectedInput(response.next_expected_input ?? null);
     } catch (messageError) {
       setError((messageError as Error).message);
       setMessages(nextMessages);
@@ -42,6 +66,11 @@ function App() {
       setIsLoading(false);
     }
   };
+
+  const composerHelper = useMemo(() => {
+    const expectedInput = nextExpectedInput ?? inferExpectedInputFromAssistant(messages);
+    return expectedInput ? NEXT_INPUT_HELPER[expectedInput] : null;
+  }, [messages, nextExpectedInput]);
 
   return (
     <main className="chat-shell">
@@ -63,6 +92,19 @@ function App() {
         )}
       </section>
 
+      {magicLinkScript ? (
+        <section className="script-card" aria-live="polite">
+          <h2>Magic Link Script</h2>
+          <p>
+            <strong>Version:</strong> {magicLinkScript.version ?? 'unknown'}
+          </p>
+          <p>
+            <strong>Checksum (SHA-256):</strong> {magicLinkScript.checksum_sha256 ?? 'unknown'}
+          </p>
+          <pre>{magicLinkScript.content}</pre>
+        </section>
+      ) : null}
+
       <form className="composer" onSubmit={handleSend}>
         <label htmlFor="prompt">Message</label>
         <textarea
@@ -72,6 +114,7 @@ function App() {
           onChange={(event) => setInput(event.target.value)}
           placeholder="Ask the agent to build a magic link IAM flow..."
         />
+        {composerHelper ? <p className="composer-hint">{composerHelper}</p> : null}
         <button type="submit" disabled={isLoading || !sessionId}>
           {isLoading ? 'Sending...' : 'Send'}
         </button>
