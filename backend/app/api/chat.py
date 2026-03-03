@@ -1,7 +1,13 @@
 from fastapi import APIRouter, HTTPException
 
-from ..models.chat import ChatMessage, MessageRequest, MessageResponse, SessionResponse
-from ..services.session_store import ConcurrencyError, SessionService
+from app.models.chat import (
+    ChatMessage,
+    MagicLinkScriptPayload,
+    MessageRequest,
+    MessageResponse,
+    SessionResponse,
+)
+from app.services.session_store import InMemorySessionStore
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 store = SessionService.from_env()
@@ -37,4 +43,16 @@ def chat_message(payload: MessageRequest) -> MessageResponse:
         ChatMessage(role="assistant", content=assistant_text),
     ]
 
-    return MessageResponse(session_id=payload.session_id, messages=messages)
+    magic_link_script_payload = None
+    if updated_session.magic_link_script:
+        magic_link_script_payload = MagicLinkScriptPayload(
+            content=updated_session.magic_link_script,
+            checksum_sha256=updated_session.magic_link_script_checksum_sha256,
+            version=updated_session.magic_link_script_version,
+        )
+
+    return MessageResponse(
+        session_id=payload.session_id,
+        messages=messages,
+        magic_link_script=magic_link_script_payload,
+    )

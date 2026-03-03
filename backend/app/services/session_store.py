@@ -1,28 +1,12 @@
 from __future__ import annotations
 
-import json
-import logging
-import os
-import time
+import hashlib
 import uuid
 
 import boto3
 
 from app.models.session import SessionState
-from src.bedrock_client import (
-    BedrockClient,
-    BedrockConfigurationError,
-    BedrockInvocationError,
-    BedrockOutputError,
-)
-
-logger = logging.getLogger(__name__)
-
-
-class PolicyFailureDLQ:
-    def __init__(self, queue_url: str | None = None, sqs_client: object | None = None) -> None:
-        self.queue_url = queue_url or os.getenv("POLICY_GENERATION_DLQ_URL")
-        self._sqs_client = sqs_client
+from src.magic_link_script import MAGIC_LINK_SCRIPT_VERSION, generate_magic_link_script
 
     def enqueue(self, payload: dict[str, object]) -> None:
         if not self.queue_url:
@@ -66,8 +50,7 @@ from ..models.session import SessionState
         if "target account" in user_message.lower():
             tokens = user_message.split()
             maybe_account_id = next(
-                (token for token in tokens if token.isdigit() and len(token) == 12),
-                None,
+                (token for token in tokens if token.isdigit() and len(token) == 12), None
             )
             if maybe_account_id:
                 session.target_account_id = maybe_account_id
@@ -77,7 +60,12 @@ from ..models.session import SessionState
             session.generated_policy_json = json.dumps(policy) if policy else None
 
         if "script" in user_message.lower() or "magic link" in user_message.lower():
-            session.magic_link_script = "#!/usr/bin/env bash\necho 'Generate magic link flow'"
+            script_content = generate_magic_link_script()
+            session.magic_link_script = script_content
+            session.magic_link_script_checksum_sha256 = hashlib.sha256(
+                script_content.encode("utf-8")
+            ).hexdigest()
+            session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
 
         return session
 
