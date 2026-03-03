@@ -6,7 +6,7 @@ This repository uses a monorepo layout with a React chat frontend and a FastAPI 
 
 - `frontend/`: React + Vite chat UI that creates a session and sends chat turns.
 - `backend/`: FastAPI API for session creation and workflow turn processing.
-- `infra/`: Placeholder folder for IaC templates and deployment artifacts.
+- `infra/`: IaC templates and deployment artifacts for AWS hosting.
 
 ## Architecture overview
 
@@ -36,50 +36,28 @@ This application does **not** use "all AWS services." It currently uses only the
 | AWS Systems Manager Parameter Store | Optional | Resolve Bedrock model ID at runtime when `BEDROCK_MODEL_ID_PARAMETER` is set. | Backend env (`BEDROCK_MODEL_ID_PARAMETER`) and backend code (`backend/src/bedrock_client.py`). |
 | AWS Secrets Manager | Optional | Resolve Bedrock model ID at runtime when `BEDROCK_MODEL_ID_SECRET_ID` is set. | Backend env (`BEDROCK_MODEL_ID_SECRET_ID`, optional `BEDROCK_MODEL_ID_SECRET_KEY`) and backend code (`backend/src/bedrock_client.py`). |
 | Amazon SQS | Optional | Receive failed synchronous policy-generation events when a DLQ URL is configured. | Backend env (`POLICY_GENERATION_DLQ_URL`) and backend code (`backend/app/services/session_store.py`). |
-| Amazon DynamoDB | Optional (future) | Not used at runtime in the current implementation; session state is in-memory only. Reserved for a future persistent session store. | Placeholder template only: `infra/dynamodb-sessions.yaml`. |
 
-## Local setup
+## Frontend hosting and deployment
 
-1. Copy environment values:
+The frontend is intended for AWS static hosting behind CloudFront. Provision and deploy with the infrastructure assets under `infra/`.
 
-   ```bash
-   cp .env.example .env
-   ```
+- Hosting stack template: `infra/cloudformation/frontend-static-site.yaml`
+- Build + publish script: `infra/scripts/deploy_frontend.sh`
 
-2. Start backend:
-
-   ```bash
-   cd backend
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   uvicorn app.main:app --reload --host 0.0.0.0 --port ${BACKEND_PORT:-8000}
-   ```
-
-3. Start frontend in a new shell:
-
-   ```bash
-   cd frontend
-   npm install
-   npm run dev -- --host 0.0.0.0 --port ${FRONTEND_PORT:-5173}
-   ```
-
-4. Open the frontend URL and chat with the workflow assistant.
-
-## Running exported magic-link scripts locally
+## Running exported magic-link scripts
 
 When the backend captures a `magic_link_script`, the API response includes the full script content and metadata (`checksum_sha256`, `version`) so you can save and verify it before running.
 
-### Local prerequisites
+### Prerequisites
 
-- `python` 3.11+ available on your workstation (`python --version`).
+- `python` 3.11+ available in the execution environment (`python --version`).
 - `boto3` installed in the environment used to execute the script (`pip install boto3`).
 - AWS credentials available from a standard provider chain source (for example environment variables, shared credentials file, AWS SSO, or an instance/task role).
 
 ### Safe default execution example
 
 ```bash
-# Save response payload field magic_link_script.content into a local file
+# Save response payload field magic_link_script.content into a file
 cat > magic_link.py <<'PY'
 <PASTE_SCRIPT_CONTENT_HERE>
 PY
@@ -94,7 +72,7 @@ PY
 # Run with least-privilege defaults and short-lived session
 python magic_link.py \
   --role-arn arn:aws:iam::123456789012:role/ExampleFederationRole \
-  --session-name local-magic-link \
+  --session-name aws-magic-link \
   --region us-east-1
 ```
 
@@ -123,10 +101,9 @@ black .
 - `POST /api/chat/message`: Accepts `session_id`, `message`, and optional `history`, then returns updated transcript plus optional `magic_link_script` payload (script content + checksum/version metadata).
 - `GET /health`: Basic service health check.
 
-
 ## Bedrock policy generation configuration
 
-The backend `InMemorySessionStore` now calls `BedrockClient.generate_policy_from_functions` when a user message asks for policy generation.
+The backend `InMemorySessionStore` calls `BedrockClient.generate_policy_from_functions` when a user message asks for policy generation.
 
 Set **one** of these model ID configuration options:
 

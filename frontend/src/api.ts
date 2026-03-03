@@ -4,7 +4,7 @@ function getApiBaseUrl(): string {
   const configuredUrl = import.meta.env.VITE_API_BASE_URL;
 
   if (!configuredUrl || configuredUrl.trim().length === 0) {
-    return 'http://localhost:8000';
+    throw new Error('VITE_API_BASE_URL must be configured for this deployment.');
   }
 
   return configuredUrl.replace(/\/+$/, '');
