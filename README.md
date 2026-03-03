@@ -48,6 +48,38 @@ This repository now uses a monorepo layout with a React chat frontend and a Fast
 
 4. Open the frontend URL and chat with the workflow assistant.
 
+## Running exported magic-link scripts locally
+
+When the backend captures a `magic_link_script`, the API response includes the full script content and metadata (`checksum_sha256`, `version`) so you can save and verify it before running.
+
+### Local prerequisites
+
+- `python` 3.11+ available on your workstation (`python --version`).
+- `boto3` installed in the environment used to execute the script (`pip install boto3`).
+- AWS credentials available from a standard provider chain source (for example environment variables, shared credentials file, AWS SSO, or an instance/task role).
+
+### Safe default execution example
+
+```bash
+# Save response payload field magic_link_script.content into a local file
+cat > magic_link.py <<'PY'
+<PASTE_SCRIPT_CONTENT_HERE>
+PY
+
+# Optional: verify checksum from magic_link_script.checksum_sha256
+python - <<'PY'
+import hashlib
+from pathlib import Path
+print(hashlib.sha256(Path('magic_link.py').read_bytes()).hexdigest())
+PY
+
+# Run with least-privilege defaults and short-lived session
+python magic_link.py \
+  --role-arn arn:aws:iam::123456789012:role/ExampleFederationRole \
+  --session-name local-magic-link \
+  --region us-east-1
+```
+
 ## Linting and formatting
 
 ### Frontend
@@ -70,5 +102,5 @@ black .
 ## API endpoints
 
 - `POST /api/chat/session`: Creates a new session and returns `session_id`.
-- `POST /api/chat/message`: Accepts `session_id`, `message`, and optional `history`, then returns updated transcript.
+- `POST /api/chat/message`: Accepts `session_id`, `message`, and optional `history`, then returns updated transcript plus optional `magic_link_script` payload (script content + checksum/version metadata).
 - `GET /health`: Basic service health check.

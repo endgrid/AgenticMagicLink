@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Dict
 
 from app.models.session import SessionState
+from src.magic_link_script import MAGIC_LINK_SCRIPT_VERSION, generate_magic_link_script
 
 
 class InMemorySessionStore:
@@ -24,11 +26,15 @@ class InMemorySessionStore:
         session = self._sessions[session_id]
 
         if "required_functions" in user_message.lower():
-            session.required_functions = [item.strip() for item in user_message.split(",") if item.strip()]
+            session.required_functions = [
+                item.strip() for item in user_message.split(",") if item.strip()
+            ]
 
         if "target account" in user_message.lower():
             tokens = user_message.split()
-            maybe_account_id = next((token for token in tokens if token.isdigit() and len(token) == 12), None)
+            maybe_account_id = next(
+                (token for token in tokens if token.isdigit() and len(token) == 12), None
+            )
             if maybe_account_id:
                 session.target_account_id = maybe_account_id
 
@@ -36,6 +42,11 @@ class InMemorySessionStore:
             session.generated_policy_json = '{"Version":"2012-10-17","Statement":[]}'
 
         if "script" in user_message.lower() or "magic link" in user_message.lower():
-            session.magic_link_script = "#!/usr/bin/env bash\necho 'Generate magic link flow'"
+            script_content = generate_magic_link_script()
+            session.magic_link_script = script_content
+            session.magic_link_script_checksum_sha256 = hashlib.sha256(
+                script_content.encode("utf-8")
+            ).hexdigest()
+            session.magic_link_script_version = MAGIC_LINK_SCRIPT_VERSION
 
         return session
